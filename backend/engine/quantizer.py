@@ -1,0 +1,359 @@
+"""
+Rhythmic Quantization and MusicXML Sheet Music Builder using music21
+"""
+import os
+import tempfile
+from fractions import Fraction
+from typing import List, Dict, Any, Optional, Tuple
+import music21
+from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration
+
+
+class ScoreQuantizer:
+    """
+    Translates raw transcribed MIDI note events into readable,
+    rhythmically quantized, standard MusicXML scores.
+    """
+
+    # Supported quantization grid fractions (in quarterLength beats)
+    # 1 quarterLength = 1 Quarter note in 4/4
+    GRID_FRACTIONS = {
+        "1/4": Fraction(1, 1),
+        "1/8": Fraction(1, 2),
+        "1/16": Fraction(1, 4),
+        "1/32": Fraction(1, 8),
+        "triplet_8th": Fraction(1, 3),
+        "triplet_16th": Fraction(1, 6),
+    }
+
+    # Standard expressible durations in descending order
+    STANDARD_REST_DURATIONS = [
+        Fraction(4, 1),  # Whole
+        Fraction(3, 1),  # Dotted Half
+        Fraction(2, 1),  # Half
+        Fraction(3, 2),  # Dotted Quarter
+        Fraction(1, 1),  # Quarter
+        Fraction(3, 4),  # Dotted 8th
+        Fraction(1, 2),  # 8th
+        Fraction(3, 8),  # Dotted 16th
+        Fraction(1, 4),  # 16th
+        Fraction(1, 8),  # 32nd
+    ]
+
+    @classmethod
+    def decompose_into_standard_durations(cls, total_frac: Fraction) -> List[Fraction]:
+        """Decomposes an arbitrary fraction of beats into valid musical durations."""
+        components = []
+        remaining = total_frac
+        while remaining > Fraction(0, 1):
+            matched = False
+            for std in cls.STANDARD_REST_DURATIONS:
+                if std <= remaining:
+                    components.append(std)
+                    remaining -= std
+                    matched = True
+                    break
+            if not matched:
+                # Smallest fallback
+                components.append(remaining)
+                break
+        return components
+
+    @classmethod
+    def quantize_fraction(cls, val_frac: Fraction, step_frac: Fraction) -> Fraction:
+        """Snaps a fraction to the closest integer multiple of step_frac."""
+        if step_frac <= 0:
+            return val_frac
+        mult = round(float(val_frac / step_frac))
+        return mult * step_frac
+
+    @classmethod
+    def seconds_to_quarter_fraction(cls, seconds: float, bpm: float) -> Fraction:
+        """Converts seconds into an exact Fraction representing quarterLength beats."""
+        beat_seconds = 60.0 / max(30.0, bpm)
+        ql_float = seconds / beat_seconds
+        # Snap to 1/32nd beat resolution (Fraction denominator 8)
+        rounded_32nds = round(ql_float * 8)
+        return Fraction(rounded_32nds, 8)
+
+    @classmethod
+    def build_score(
+        cls,
+        note_events: List[Dict[str, Any]],
+        bpm: float = 120.0,
+        time_signature_str: str = "4/4",
+        key_tonic: str = "C",
+        key_mode: str = "major",
+        clef_mode: str = "grand_staff",  # 'grand_staff', 'treble', 'bass', 'alto'
+        quantization_grid: str = "1/16",
+        title: str = "Transcribed Instrumental",
+        composer: str = "Music-Decoder AI"
+    ) -> stream.Score:
+        """
+        Builds a complete, quantized, verified music21 Score.
+        """
+        score = stream.Score()
+        score.metadata = metadata.Metadata()
+        score.metadata.title = title
+        score.metadata.composer = composer
+
+        # Parse meter & key
+        try:
+            ts = meter.TimeSignature(time_signature_str)
+        except Exception:
+            ts = meter.TimeSignature("4/4")
+        measure_len_frac = Fraction(int(ts.barDuration.quarterLength * 8), 8)
+
+        try:
+            score_key = key.Key(key_tonic, key_mode)
+        except Exception:
+            score_key = key.Key("C", "major")
+
+        grid_step = cls.GRID_FRACTIONS.get(quantization_grid, Fraction(1, 4))
+        tempo_mark = tempo.MetronomeMark(number=round(bpm))
+
+        # Quantize all note events into exact fractions
+        quantized_notes = []
+        for ev in note_events:
+            raw_start = cls.seconds_to_quarter_fraction(ev["start"], bpm)
+            raw_dur = cls.seconds_to_quarter_fraction(ev["duration"], bpm)
+
+            q_start = cls.quantize_fraction(raw_start, grid_step)
+            q_dur = cls.quantize_fraction(raw_dur, grid_step)
+            if q_dur < grid_step:
+                q_dur = grid_step
+
+            quantized_notes.append({
+                "pitch": int(ev["pitch"]),
+                "start_frac": q_start,
+                "dur_frac": q_dur,
+                "end_frac": q_start + q_dur,
+                "velocity": int(ev.get("velocity", 80))
+            })
+
+        # Separate into staves
+        if clef_mode == "grand_staff":
+            treble_notes = [n for n in quantized_notes if n["pitch"] >= 60]
+            bass_notes = [n for n in quantized_notes if n["pitch"] < 60]
+
+            treble_part = cls._assemble_part(
+                treble_notes,
+                clef_obj=clef.TrebleClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Right Hand",
+                grid_step=grid_step
+            )
+            bass_part = cls._assemble_part(
+                bass_notes,
+                clef_obj=clef.BassClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=None,
+                measure_len_frac=measure_len_frac,
+                part_name="Left Hand",
+                grid_step=grid_step
+            )
+
+            # Equalize measure counts
+            num_m = max(len(treble_part.getElementsByClass('Measure')), len(bass_part.getElementsByClass('Measure')), 1)
+            cls._pad_part_measures(treble_part, num_m, measure_len_frac)
+            cls._pad_part_measures(bass_part, num_m, measure_len_frac)
+
+            staff_group = layout.StaffGroup([treble_part, bass_part], name="Piano", abbreviation="Pno.", symbol="brace")
+            staff_group.barTogether = 'mensurstrich'
+            score.append(staff_group)
+            score.append(treble_part)
+            score.append(bass_part)
+        else:
+            clef_map = {
+                "treble": clef.TrebleClef(),
+                "bass": clef.BassClef(),
+                "alto": clef.AltoClef(),
+                "tenor": clef.TenorClef()
+            }
+            chosen_clef = clef_map.get(clef_mode, clef.TrebleClef())
+            solo_part = cls._assemble_part(
+                quantized_notes,
+                clef_obj=chosen_clef,
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Instrument",
+                grid_step=grid_step
+            )
+            score.append(solo_part)
+
+        return score
+
+    @classmethod
+    def _assemble_part(
+        cls,
+        notes_list: List[Dict[str, Any]],
+        clef_obj: clef.Clef,
+        ts: meter.TimeSignature,
+        score_key: key.Key,
+        tempo_mark: Optional[tempo.MetronomeMark],
+        measure_len_frac: Fraction,
+        part_name: str,
+        grid_step: Fraction
+    ) -> stream.Part:
+        """
+        Assembles a stream.Part measure-by-measure with standard expressible durations.
+        """
+        part = stream.Part()
+        part.partName = part_name
+
+        if not notes_list:
+            m = stream.Measure(number=1)
+            m.append(clef_obj)
+            m.append(score_key)
+            m.append(ts)
+            if tempo_mark:
+                m.append(tempo_mark)
+            r = note.Rest()
+            r.duration = duration.Duration(measure_len_frac)
+            m.append(r)
+            part.append(m)
+            return part
+
+        # Split any notes crossing measure boundaries
+        split_notes = []
+        for n_item in notes_list:
+            start = n_item["start_frac"]
+            end = n_item["end_frac"]
+            pitch_val = n_item["pitch"]
+            vel = n_item["velocity"]
+
+            cur_start = start
+            while cur_start < end:
+                m_index = int(cur_start // measure_len_frac)
+                m_end = Fraction(m_index + 1, 1) * measure_len_frac
+                cur_end = min(end, m_end)
+                cur_dur = cur_end - cur_start
+
+                is_tied_start = (cur_end < end)
+                is_tied_stop = (cur_start > start)
+
+                split_notes.append({
+                    "pitch": pitch_val,
+                    "measure_idx": m_index,
+                    "m_offset": cur_start - (Fraction(m_index, 1) * measure_len_frac),
+                    "dur_frac": cur_dur,
+                    "velocity": vel,
+                    "tie_type": "continue" if (is_tied_start and is_tied_stop) else ("start" if is_tied_start else ("stop" if is_tied_stop else None))
+                })
+                cur_start = cur_end
+
+        max_m_idx = max(item["measure_idx"] for item in split_notes)
+        measures_dict = {i: [] for i in range(max_m_idx + 1)}
+        for item in split_notes:
+            measures_dict[item["measure_idx"]].append(item)
+
+        for m_idx in range(max_m_idx + 1):
+            m = stream.Measure(number=m_idx + 1)
+            if m_idx == 0:
+                m.append(clef_obj)
+                m.append(score_key)
+                m.append(ts)
+                if tempo_mark:
+                    m.append(tempo_mark)
+
+            m_notes = measures_dict.get(m_idx, [])
+            m_notes.sort(key=lambda x: x["m_offset"])
+
+            curr_pos = Fraction(0, 1)
+            idx = 0
+            while idx < len(m_notes):
+                n_info = m_notes[idx]
+                target_offset = max(curr_pos, n_info["m_offset"])
+
+                # Insert rests if gap exists
+                gap = target_offset - curr_pos
+                if gap >= Fraction(1, 8):
+                    for rest_dur in cls.decompose_into_standard_durations(gap):
+                        r = note.Rest()
+                        r.duration = duration.Duration(rest_dur)
+                        m.append(r)
+                    curr_pos = target_offset
+
+                # Group chords
+                simultaneous = [n_info]
+                next_idx = idx + 1
+                while next_idx < len(m_notes) and m_notes[next_idx]["m_offset"] == n_info["m_offset"]:
+                    simultaneous.append(m_notes[next_idx])
+                    next_idx += 1
+
+                idx = next_idx
+                max_dur = max(sn["dur_frac"] for sn in simultaneous)
+
+                # Decompose note duration into standard components if complex
+                dur_components = cls.decompose_into_standard_durations(max_dur)
+                for c_idx, comp_dur in enumerate(dur_components):
+                    is_sub_tied = (len(dur_components) > 1)
+                    if len(simultaneous) > 1:
+                        pitches = [sn["pitch"] for sn in simultaneous]
+                        ch = chord.Chord(pitches)
+                        ch.duration = duration.Duration(comp_dur)
+                        ch.volume.velocity = simultaneous[0]["velocity"]
+                        m.append(ch)
+                    else:
+                        n = note.Note(n_info["pitch"])
+                        n.duration = duration.Duration(comp_dur)
+                        n.volume.velocity = n_info["velocity"]
+                        
+                        # Tie handling
+                        if n_info.get("tie_type"):
+                            n.tie = tie.Tie(n_info["tie_type"])
+                        elif is_sub_tied:
+                            if c_idx < len(dur_components) - 1:
+                                n.tie = tie.Tie('start')
+                            elif c_idx > 0:
+                                n.tie = tie.Tie('stop')
+                        m.append(n)
+
+                curr_pos = target_offset + max_dur
+
+            # Fill remaining measure with rests
+            remaining = measure_len_frac - curr_pos
+            if remaining >= Fraction(1, 8):
+                for rest_dur in cls.decompose_into_standard_durations(remaining):
+                    r = note.Rest()
+                    r.duration = duration.Duration(rest_dur)
+                    m.append(r)
+
+            part.append(m)
+
+        return part
+
+    @classmethod
+    def _pad_part_measures(cls, part: stream.Part, target_count: int, measure_len_frac: Fraction) -> None:
+        existing_count = len(part.getElementsByClass('Measure'))
+        for m_idx in range(existing_count, target_count):
+            m = stream.Measure(number=m_idx + 1)
+            for rest_dur in cls.decompose_into_standard_durations(measure_len_frac):
+                r = note.Rest()
+                r.duration = duration.Duration(rest_dur)
+                m.append(r)
+            part.append(m)
+
+    @classmethod
+    def to_musicxml_string(cls, score: stream.Score) -> str:
+        """Exports music21 Score to MusicXML string via temporary file."""
+        with tempfile.NamedTemporaryFile(suffix='.musicxml', delete=False) as tf:
+            temp_path = tf.name
+
+        try:
+            score.write('musicxml', fp=temp_path)
+            with open(temp_path, 'r', encoding='utf-8') as f:
+                xml_str = f.read()
+            return xml_str
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
