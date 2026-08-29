@@ -6,7 +6,7 @@ import tempfile
 from fractions import Fraction
 from typing import List, Dict, Any, Optional, Tuple
 import music21
-from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration
+from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument
 
 
 class ScoreQuantizer:
@@ -341,6 +341,160 @@ class ScoreQuantizer:
             part.append(m)
 
     @classmethod
+    def build_multitrack_score(
+        cls,
+        tracks: Dict[str, Dict[str, Any]],
+        bpm: float = 120.0,
+        time_signature_str: str = "4/4",
+        key_tonic: str = "C",
+        key_mode: str = "major",
+        quantization_grid: str = "1/16",
+        title: str = "Multi-Track Orchestral Transcription",
+        composer: str = "Music-Decoder Conductor AI"
+    ) -> stream.Score:
+        """
+        Builds a full multi-part Conductor's Score combining all separated stems.
+        """
+        score = stream.Score()
+        score.metadata = metadata.Metadata()
+        score.metadata.title = title
+        score.metadata.composer = composer
+
+        try:
+            ts = meter.TimeSignature(time_signature_str)
+        except Exception:
+            ts = meter.TimeSignature("4/4")
+        measure_len_frac = Fraction(int(ts.barDuration.quarterLength * 8), 8)
+
+        try:
+            score_key = key.Key(key_tonic, key_mode)
+        except Exception:
+            score_key = key.Key("C", "major")
+
+        grid_step = cls.GRID_FRACTIONS.get(quantization_grid, Fraction(1, 4))
+        tempo_mark = tempo.MetronomeMark(number=round(bpm))
+
+        assembled_parts = []
+
+        # Part 1: Lead Melody (Flute / Violin / Vocal)
+        if "lead" in tracks and len(tracks["lead"].get("notes", [])) > 0:
+            lead_notes_raw = tracks["lead"]["notes"]
+            q_lead = cls._quantize_note_list(lead_notes_raw, bpm, grid_step)
+            lead_part = cls._assemble_part(
+                q_lead,
+                clef_obj=clef.TrebleClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Lead / Winds / Solo",
+                grid_step=grid_step
+            )
+            lead_part.insert(0, instrument.Flute())
+            assembled_parts.append(lead_part)
+
+        # Part 2: Harmony / Keys / Strings
+        if "harmony" in tracks and len(tracks["harmony"].get("notes", [])) > 0:
+            harmony_notes_raw = tracks["harmony"]["notes"]
+            q_harm = cls._quantize_note_list(harmony_notes_raw, bpm, grid_step)
+            harm_part = cls._assemble_part(
+                q_harm,
+                clef_obj=clef.TrebleClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark if len(assembled_parts) == 0 else None,
+                measure_len_frac=measure_len_frac,
+                part_name="Harmony / Keys / Strings",
+                grid_step=grid_step
+            )
+            harm_part.insert(0, instrument.Piano())
+            assembled_parts.append(harm_part)
+
+        # Part 3: Bassline / Cello / Low Brass
+        if "bass" in tracks and len(tracks["bass"].get("notes", [])) > 0:
+            bass_notes_raw = tracks["bass"]["notes"]
+            q_bass = cls._quantize_note_list(bass_notes_raw, bpm, grid_step)
+            bass_part = cls._assemble_part(
+                q_bass,
+                clef_obj=clef.BassClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark if len(assembled_parts) == 0 else None,
+                measure_len_frac=measure_len_frac,
+                part_name="Bass / Cello",
+                grid_step=grid_step
+            )
+            bass_part.insert(0, instrument.ElectricBass())
+            assembled_parts.append(bass_part)
+
+        # Part 4: Percussion / Drums
+        if "drums" in tracks and len(tracks["drums"].get("notes", [])) > 0:
+            drum_notes_raw = tracks["drums"]["notes"]
+            q_drums = cls._quantize_note_list(drum_notes_raw, bpm, grid_step)
+            drum_part = cls._assemble_part(
+                q_drums,
+                clef_obj=clef.PercussionClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark if len(assembled_parts) == 0 else None,
+                measure_len_frac=measure_len_frac,
+                part_name="Drums / Percussion",
+                grid_step=grid_step
+            )
+            drum_part.insert(0, instrument.BassDrum())
+            assembled_parts.append(drum_part)
+
+        if not assembled_parts:
+            # Fallback empty score
+            empty_part = cls._assemble_part(
+                [],
+                clef_obj=clef.TrebleClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Ensemble",
+                grid_step=grid_step
+            )
+            assembled_parts.append(empty_part)
+
+        # Equalize measure lengths across all parts
+        max_m = max(len(p.getElementsByClass('Measure')) for p in assembled_parts)
+        for p in assembled_parts:
+            cls._pad_part_measures(p, max_m, measure_len_frac)
+
+        # Add Orchestral Bracket Group
+        group = layout.StaffGroup(assembled_parts, name="Orchestra", abbreviation="Orch.", symbol="bracket")
+        group.barTogether = 'mensurstrich'
+        score.append(group)
+
+        for p in assembled_parts:
+            score.append(p)
+
+        return score
+
+    @classmethod
+    def _quantize_note_list(cls, notes_raw: List[Dict[str, Any]], bpm: float, grid_step: Fraction) -> List[Dict[str, Any]]:
+        """Helper to quantize a raw note list into exact fractions."""
+        q_list = []
+        for ev in notes_raw:
+            raw_start = cls.seconds_to_quarter_fraction(ev["start"], bpm)
+            raw_dur = cls.seconds_to_quarter_fraction(ev["duration"], bpm)
+            q_start = cls.quantize_fraction(raw_start, grid_step)
+            q_dur = cls.quantize_fraction(raw_dur, grid_step)
+            if q_dur < grid_step:
+                q_dur = grid_step
+
+            q_list.append({
+                "pitch": int(ev["pitch"]),
+                "start_frac": q_start,
+                "dur_frac": q_dur,
+                "end_frac": q_start + q_dur,
+                "velocity": int(ev.get("velocity", 80))
+            })
+        return q_list
+
+    @classmethod
     def to_musicxml_string(cls, score: stream.Score) -> str:
         """Exports music21 Score to MusicXML string via temporary file."""
         with tempfile.NamedTemporaryFile(suffix='.musicxml', delete=False) as tf:
@@ -357,3 +511,4 @@ class ScoreQuantizer:
                     os.remove(temp_path)
                 except Exception:
                     pass
+
