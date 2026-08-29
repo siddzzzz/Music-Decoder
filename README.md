@@ -1,29 +1,36 @@
-# 🎼 Music-Decoder • AI Instrumental Music to Sheet Music Studio
+# 🎼 Music-Decoder • AI Instrumental & Orchestral Music to Sheet Music Studio
 
-> **State-of-the-Art Automatic Music Transcription (AMT) & Interactive Sheet Music Engraving System**
+> **State-of-the-Art Automatic Music Transcription (AMT) & Conductor Score Engraving System**
 
-Music-Decoder is an end-to-end AI system and modern web studio that transcribes instrumental audio recordings (piano, acoustic guitar, woodwinds, violin, saxophone, synths, etc.) into readable, beautifully engraved musical sheet notation with real-time synchronized playback and multi-format exports (**PDF**, **MusicXML**, **MIDI**, **WAV**).
+Music-Decoder is an end-to-end AI system and modern web studio that transcribes instrumental audio recordings (solo instruments, acoustic ensembles, full bands, and orchestral compositions) into readable, beautifully engraved musical sheet notation with real-time synchronized playback, AI stem mixing, and universal multi-format exports (**PDF**, **MusicXML**, **Type-1 Multi-Track MIDI**, **WAV**).
 
 ---
 
 ## ✨ Key Features
 
-- 🧠 **Neural Polyphonic Pitch Detection**: Powered by **Spotify Basic Pitch (ONNX)** neural network for onset/frame/offset detection and pitch estimation.
-- 🎼 **Musicological Rhythm Quantization**: Translates raw microsecond note timestamps into exact musical rhythm subdivisions (**1/4, 1/8, 1/16, 1/32, Triplets**) using **music21**.
-- 🎹 **Intelligent Clef & Voice Splitting**:
-  - **Grand Staff (Piano)**: Middle-C split across Treble & Bass staves with tied notes and voice balancing.
-  - **Solo Staves**: Treble, Bass, Alto, and Tenor clefs.
-- 🎯 **Key & Tempo Detection**:
-  - Automatic dynamic BPM and beat-tracking via **Librosa**.
-  - Chromagram harmonic key signature detection (Krumhansl-Schmuckler algorithm) with accidental enharmonic spelling (e.g. F# vs Gb).
+- 🎻 **Multi-Track Orchestral & Full Song Transcription**:
+  - Powered by **Meta AI's HT-Demucs (Hybrid Transformer)** neural source separation on **NVIDIA CUDA GPU**.
+  - Automatically isolates audio into 4 stems: **Lead / Winds / Solo**, **Harmony / Keys / Strings**, **Bass / Cello**, **Drums / Percussion**.
+  - Runs dedicated pitch and rhythm transcribers per stem to eliminate harmonic frequency collisions.
+- 🎼 **Conductor's Multi-Staff Score Engraving**:
+  - Assembles a full Orchestral Score in **music21** with dedicated staves, brackets, and linked barlines.
+  - Clef routing: **Treble Clef** (Lead / Flute / Violin), **Grand Staff / Treble** (Piano / Strings), **Bass Clef** (Bass / Cello), **Percussion Clef** (Drums).
+- 🧠 **Neural Polyphonic Pitch Detection**: Powered by **Spotify Basic Pitch (ONNX)** for high-precision note onsets, sustained frames, offsets, and velocities.
+- 🎚️ **AI Stem Mixer & Conductor Board**:
+  - Real-time volume sliders, Solo (`S`), and Mute (`M`) buttons for each separated instrument track.
+  - Direct 1-click download of isolated stem audio files (`.wav`).
+- 🎹 **Interactive Multi-Track Piano Roll**: Visual canvas color-coding notes by instrument stem (Cyan = Lead, Purple = Harmony, Emerald = Bass, Amber = Percussion).
 - 👁️ **Interactive Sheet Music Notation**: Rendered using **OpenSheetMusicDisplay (OSMD)** with dynamic zoom, live cursor following note-by-note, and transposition (+/- semitones).
-- 🎹 **Interactive Neural Piano Roll**: Visual canvas displaying notes color-coded by velocity, live playhead scrubbing, and instant auditioning.
 - 📦 **Universal Multi-Format Export**:
-  - **Sheet Music PDF**: High-resolution printable score document.
+  - **Sheet Music PDF**: High-resolution printable score document (Conductor's score & individual staves).
   - **MusicXML (.musicxml)**: Compatible with MuseScore, Finale, Sibelius, Dorico, Noteflight.
-  - **MIDI (.mid)**: Multi-track sequence for Ableton, FL Studio, Logic Pro.
+  - **Multi-Track MIDI (.mid)**: Type-1 multi-track sequence for Ableton, FL Studio, Logic Pro.
   - **Audio (.wav)** & Direct **Print**.
-- ⚡ **1-Click Built-in Demos**: Comes with synthetic Classical Piano, Acoustic Guitar, and Woodwind sample tracks for instant out-of-the-box testing!
+- ⚡ **1-Click Built-in Demos**:
+  - Classical Piano Arpeggio (C Major)
+  - Acoustic Guitar Fingerstyle (E Minor)
+  - Solo Woodwind & Flute Melody (D Major)
+  - **Symphonic Orchestral Ensemble (G Major)** (Multi-Track 4-stem band)
 
 ---
 
@@ -33,27 +40,31 @@ Music-Decoder is an end-to-end AI system and modern web studio that transcribes 
 Music-Decoder/
 ├── backend/
 │   ├── engine/
+│   │   ├── stem_separator.py     # Meta HT-Demucs neural source separation on CUDA GPU
+│   │   ├── multitrack_engine.py  # Multi-track coordinator & dedicated stem transcription
 │   │   ├── audio_processor.py    # Librosa BPM, beat grid & key detection
 │   │   ├── transcriber.py        # Spotify Basic-Pitch ONNX neural model
-│   │   ├── quantizer.py          # music21 Fraction rhythm quantizer & MusicXML builder
-│   │   ├── exporter.py           # PDF, MusicXML, and MIDI exporters
-│   │   └── sample_generator.py   # Instrumental synthetic audio generator
+│   │   ├── quantizer.py          # music21 Fraction rhythm quantizer & multi-staff builder
+│   │   ├── exporter.py           # Multi-track PDF, MusicXML, and Type-1 MIDI exporters
+│   │   └── sample_generator.py   # Instrumental and orchestral audio generator
 │   ├── samples/                  # Built-in demo tracks
 │   ├── main.py                   # FastAPI REST server
 │   ├── requirements.txt          # Python dependencies
-│   └── test_transcription.py     # Automated test suite
+│   ├── test_transcription.py     # Solo instrument test suite
+│   └── test_multitrack.py        # Multi-Track CUDA test suite
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Navbar.tsx            # Header with status & export actions
-│   │   │   ├── AudioUploader.tsx     # Dropzone, mic recorder & sample cards
+│   │   │   ├── Navbar.tsx            # Header with GPU status & export actions
+│   │   │   ├── AudioUploader.tsx     # Dropzone, mic recorder, mode switch & presets
+│   │   │   ├── StemMixer.tsx         # AI 4-stem mixer (volume, solo, mute, stem WAV)
 │   │   │   ├── ScoreViewer.tsx       # OSMD vector sheet music with live cursor
-│   │   │   ├── PianoRoll.tsx         # Interactive canvas piano roll
+│   │   │   ├── PianoRoll.tsx         # Multi-track canvas piano roll
 │   │   │   ├── WaveformVisualizer.tsx# Audio waveform & beat marker scrubber
 │   │   │   ├── ControlPanel.tsx      # AI threshold & quantization grid controls
 │   │   │   ├── NotesTable.tsx        # Searchable notes stream & statistics
-│   │   │   └── ExportModal.tsx       # PDF / MusicXML / MIDI download modal
+│   │   │   └── ExportModal.tsx       # PDF / MusicXML / MIDI / Stems download modal
 │   │   ├── services/
 │   │   │   ├── api.ts                # REST API client
 │   │   │   └── synth.ts              # Web Audio polyphonic synthesizer
@@ -71,7 +82,8 @@ Music-Decoder/
 ## 🚀 Getting Started
 
 ### 1. Requirements
-- **Python 3.11** or compatible Python runtime
+- **Python 3.11**
+- **NVIDIA GPU** with CUDA (tested on RTX 3050 Laptop GPU) or CPU fallback
 - **Node.js** (v18+)
 
 ### 2. Setup Virtual Environment & Backend
@@ -93,18 +105,6 @@ cd ..
 ```powershell
 .\venv\Scripts\python start_app.py
 ```
-Or start the backend and frontend separately:
-
-- **Backend API**:
-  ```powershell
-  cd backend
-  ..\venv\Scripts\python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-  ```
-- **Frontend Studio**:
-  ```powershell
-  cd frontend
-  npm run dev
-  ```
 
 Open your browser at **http://localhost:5173**!
 
@@ -112,10 +112,14 @@ Open your browser at **http://localhost:5173**!
 
 ## 🧪 Running Automated Tests
 
-To verify the complete audio processing, neural transcription, quantization, and export pipeline:
-
+### Test 1: Solo / Polyphonic Instrument Pipeline
 ```powershell
 .\venv\Scripts\python backend/test_transcription.py
+```
+
+### Test 2: Multi-Track Demucs CUDA Separation & Orchestral Score Pipeline
+```powershell
+.\venv\Scripts\python backend/test_multitrack.py
 ```
 
 ---
