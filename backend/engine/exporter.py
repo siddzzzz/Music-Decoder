@@ -221,3 +221,234 @@ class ScoreExporter:
 
         doc.build(story)
         return output_path
+
+    @classmethod
+    def save_multitrack_midi(cls, tracks: Dict[str, Dict[str, Any]], bpm: float, output_path: str) -> str:
+        """
+        Creates a standard Type 1 Multi-Track MIDI file with separate tracks for Lead, Harmony, Bass, and Drums.
+        """
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+
+        # Instrument Program mapping
+        inst_map = {
+            "lead": (73, "Flute / Lead", False),        # General MIDI Flute
+            "harmony": (0, "Piano / Harmony", False),    # Acoustic Grand Piano
+            "bass": (33, "Electric Bass", False),        # Electric Bass
+            "drums": (0, "Drums / Percussion", True)     # Drum channel (is_drum=True)
+        }
+
+        for track_id, track_data in tracks.items():
+            notes_list = track_data.get("notes", [])
+            if not notes_list:
+                continue
+
+            prog_num, track_name, is_drum = inst_map.get(track_id, (0, track_id.title(), False))
+            instrument_obj = pretty_midi.Instrument(program=prog_num, is_drum=is_drum, name=track_name)
+
+            for n_item in notes_list:
+                start = float(n_item["start"])
+                end = float(n_item["end"])
+                pitch = int(n_item["pitch"])
+                velocity = int(n_item.get("velocity", 80))
+
+                if end > start:
+                    midi_note = pretty_midi.Note(
+                        velocity=velocity,
+                        pitch=pitch,
+                        start=start,
+                        end=end
+                    )
+                    instrument_obj.notes.append(midi_note)
+
+            pm.instruments.append(instrument_obj)
+
+        pm.write(output_path)
+        return output_path
+
+    @classmethod
+    def generate_multitrack_pdf_report(
+        cls,
+        output_path: str,
+        title: str,
+        composer: str,
+        bpm: float,
+        key_signature: str,
+        time_signature: str,
+        tracks: Dict[str, Dict[str, Any]]
+    ) -> str:
+        """
+        Generates an Orchestral / Multi-Track Conductor Score PDF with breakdown of each separated instrument track.
+        """
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            'ScoreTitle',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=22,
+            leading=26,
+            textColor=colors.HexColor("#0f172a"),
+            alignment=1
+        )
+
+        subtitle_style = ParagraphStyle(
+            'ScoreSubtitle',
+            parent=styles['Normal'],
+            fontName='Helvetica-Oblique',
+            fontSize=11,
+            leading=14,
+            textColor=colors.HexColor("#64748b"),
+            alignment=1
+        )
+
+        meta_style = ParagraphStyle(
+            'ScoreMeta',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            leading=13,
+            textColor=colors.HexColor("#334155")
+        )
+
+        section_heading = ParagraphStyle(
+            'SectionHead',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor("#0f172a"),
+            spaceBefore=12,
+            spaceAfter=6
+        )
+
+        story = []
+
+        # Header Title
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"Conductor's Multi-Track Score • AI Separated & Transcribed by Music-Decoder", subtitle_style))
+        story.append(Spacer(1, 14))
+
+        # Metadata Box
+        meta_data = [
+            [
+                Paragraph(f"<b>Key:</b> {key_signature}", meta_style),
+                Paragraph(f"<b>Tempo:</b> {round(bpm)} BPM", meta_style),
+                Paragraph(f"<b>Time Signature:</b> {time_signature}", meta_style),
+                Paragraph(f"<b>Tracks:</b> {len(tracks)} Instrument Staves", meta_style),
+            ]
+        ]
+        meta_table = Table(meta_data, colWidths=[130, 130, 130, 150])
+        meta_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#f1f5f9")),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 12))
+
+        # Track Summary Table
+        story.append(Paragraph("Orchestral Instrument Staves Summary", section_heading))
+        track_rows = [
+            ["Track", "Instrument Name", "Clef", "Total Notes", "Pitch Range"]
+        ]
+
+        clef_display = {
+            "lead": "Treble Clef (𝄞)",
+            "harmony": "Treble / Grand Staff (𝄞 / 𝄢)",
+            "bass": "Bass Clef (𝄢)",
+            "drums": "Percussion Clef (𝄥)"
+        }
+
+        for track_id, track_info in tracks.items():
+            t_notes = track_info.get("notes", [])
+            if t_notes:
+                p_min = min(n["pitch"] for n in t_notes)
+                p_max = max(n["pitch"] for n in t_notes)
+                n_min = next(n["name"] for n in t_notes if n["pitch"] == p_min)
+                n_max = next(n["name"] for n in t_notes if n["pitch"] == p_max)
+                range_str = f"{n_min} ({p_min}) → {n_max} ({p_max})"
+            else:
+                range_str = "N/A"
+
+            track_rows.append([
+                track_id.upper(),
+                track_info.get("name", track_id.title()),
+                clef_display.get(track_id, "Treble Clef"),
+                str(len(t_notes)),
+                range_str
+            ])
+
+        t_table = Table(track_rows, colWidths=[65, 160, 145, 75, 95])
+        t_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t_table)
+        story.append(Spacer(1, 14))
+
+        # Sample Note Events Table
+        story.append(Paragraph("Selected Note Events across Staves", section_heading))
+        note_rows = [
+            ["Track", "Note Name", "MIDI Pitch", "Start (s)", "Duration (s)", "Velocity"]
+        ]
+
+        all_sample_notes = []
+        for track_id, track_info in tracks.items():
+            for n in track_info.get("notes", [])[:10]:
+                all_sample_notes.append((track_id, n))
+
+        all_sample_notes.sort(key=lambda x: x[1]["start"])
+
+        for tr_id, n in all_sample_notes[:35]:
+            note_rows.append([
+                tr_id.upper(),
+                n["name"],
+                str(n["pitch"]),
+                f"{n['start']:.2f}",
+                f"{n['duration']:.2f}",
+                str(n.get("velocity", 80))
+            ])
+
+        if len(all_sample_notes) > 35:
+            note_rows.append(["...", "...", "...", "...", "...", "..."])
+
+        notes_table = Table(note_rows, colWidths=[65, 95, 95, 95, 95, 95])
+        notes_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8.5),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(notes_table)
+
+        doc.build(story)
+        return output_path
+

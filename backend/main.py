@@ -18,6 +18,7 @@ from engine.transcriber import Transcriber
 from engine.quantizer import ScoreQuantizer
 from engine.exporter import ScoreExporter
 from engine.sample_generator import SampleGenerator
+from engine.multitrack_engine import MultiTrackEngine
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,8 +32,9 @@ for d in [TEMP_DIR, EXPORTS_DIR, SAMPLES_DIR]:
 # Generate sample files if not already generated
 samples_data = SampleGenerator.generate_all_samples(str(SAMPLES_DIR))
 
-# Initialize Transcriber
+# Initialize Transcribers
 transcriber = Transcriber()
+multitrack_engine = MultiTrackEngine()
 
 app = FastAPI(
     title="Music-Decoder AI API",
@@ -294,3 +296,186 @@ def download_export(task_id: str, export_type: str):
         raise HTTPException(status_code=404, detail=f"{export_type.upper()} export not found")
 
     return FileResponse(str(file_path), media_type=media_type, filename=download_name)
+
+
+@app.post("/api/transcribe-multitrack")
+async def transcribe_multitrack(
+    audio_file: UploadFile = File(...),
+    quantization_grid: str = Form("1/16"),
+    time_signature: str = Form("4/4"),
+    bpm_override: Optional[float] = Form(None),
+    key_tonic_override: Optional[str] = Form(None),
+    key_mode_override: Optional[str] = Form(None),
+    title: str = Form("Orchestral Transcription"),
+    composer: str = Form("Ensemble Performer")
+):
+    """
+    Separates a mixed song or orchestral recording into 4 stems and transcribes
+    into a Multi-Staff Conductor Score (Lead, Harmony, Bass, Drums).
+    """
+    task_id = str(uuid.uuid4())
+    task_dir = TEMP_DIR / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    file_ext = Path(audio_file.filename or "audio.wav").suffix or ".wav"
+    input_path = task_dir / f"input{file_ext}"
+
+    with open(input_path, "wb") as buffer:
+        shutil.copyfileobj(audio_file.file, buffer)
+
+    return _process_multitrack_transcription(
+        task_id=task_id,
+        audio_path=str(input_path),
+        quantization_grid=quantization_grid,
+        time_signature=time_signature,
+        bpm_override=bpm_override,
+        key_tonic_override=key_tonic_override,
+        key_mode_override=key_mode_override,
+        title=title,
+        composer=composer,
+        filename=audio_file.filename or "uploaded_song.wav"
+    )
+
+
+@app.post("/api/transcribe-sample-multitrack")
+async def transcribe_sample_multitrack(
+    sample_id: str = Form(...),
+    quantization_grid: str = Form("1/16"),
+    time_signature: str = Form("4/4"),
+    bpm_override: Optional[float] = Form(None),
+    key_tonic_override: Optional[str] = Form(None),
+    key_mode_override: Optional[str] = Form(None)
+):
+    """Transcribes a built-in demo track in multi-track mode."""
+    target_sample = next((s for s in samples_data if s["id"] == sample_id), None)
+    if not target_sample or not os.path.exists(target_sample["path"]):
+        raise HTTPException(status_code=404, detail="Sample track not found")
+
+    task_id = str(uuid.uuid4())
+    task_dir = TEMP_DIR / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    input_path = task_dir / target_sample["filename"]
+    shutil.copyfile(target_sample["path"], input_path)
+
+    return _process_multitrack_transcription(
+        task_id=task_id,
+        audio_path=str(input_path),
+        quantization_grid=quantization_grid,
+        time_signature=time_signature,
+        bpm_override=bpm_override or target_sample.get("bpm"),
+        key_tonic_override=key_tonic_override,
+        key_mode_override=key_mode_override,
+        title=target_sample["name"],
+        composer="Music-Decoder Preset",
+        filename=target_sample["filename"]
+    )
+
+
+def _process_multitrack_transcription(
+    task_id: str,
+    audio_path: str,
+    quantization_grid: str,
+    time_signature: str,
+    bpm_override: Optional[float],
+    key_tonic_override: Optional[str],
+    key_mode_override: Optional[str],
+    title: str,
+    composer: str,
+    filename: str
+) -> Dict[str, Any]:
+    """Processes multi-track stem separation and multi-part score construction."""
+    task_dir = TEMP_DIR / task_id
+
+    # Run multi-track separation & dedicated transcription per stem
+    mt_result = multitrack_engine.process_multitrack(
+        audio_path=audio_path,
+        output_dir=str(task_dir),
+        bpm_override=bpm_override,
+        key_tonic_override=key_tonic_override,
+        key_mode_override=key_mode_override
+    )
+
+    effective_bpm = mt_result["tempo"]
+    effective_tonic = mt_result["key"]["tonic"]
+    effective_mode = mt_result["key"]["mode"]
+    tracks = mt_result["tracks"]
+
+    # Build Multi-Staff Orchestral Score
+    score = ScoreQuantizer.build_multitrack_score(
+        tracks=tracks,
+        bpm=effective_bpm,
+        time_signature_str=time_signature,
+        key_tonic=effective_tonic,
+        key_mode=effective_mode,
+        quantization_grid=quantization_grid,
+        title=title,
+        composer=composer
+    )
+
+    # Save exports
+    musicxml_path = str(task_dir / "score.musicxml")
+    midi_path = str(task_dir / "transcription.mid")
+    pdf_path = str(task_dir / "sheet_music.pdf")
+
+    ScoreExporter.save_musicxml(score, musicxml_path)
+    ScoreExporter.save_multitrack_midi(tracks, effective_bpm, midi_path)
+    ScoreExporter.generate_multitrack_pdf_report(
+        output_path=pdf_path,
+        title=title,
+        composer=composer,
+        bpm=effective_bpm,
+        key_signature=mt_result["key"]["display"],
+        time_signature=time_signature,
+        tracks=tracks
+    )
+
+    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+
+    # Prepare stem audio paths and endpoints
+    stem_exports = {}
+    for t_name in tracks.keys():
+        stem_exports[t_name] = f"/api/export/{task_id}/stem/{t_name}"
+
+    return {
+        "task_id": task_id,
+        "is_multitrack": True,
+        "device": mt_result["device"],
+        "filename": filename,
+        "duration": mt_result["duration"],
+        "tempo": round(effective_bpm, 1),
+        "key": mt_result["key"],
+        "time_signature": time_signature,
+        "quantization_grid": quantization_grid,
+        "notes_count": mt_result["total_notes"],
+        "notes": mt_result["all_notes"],
+        "waveform": mt_result["waveform"],
+        "beat_times": mt_result["beat_times"],
+        "tracks": tracks,
+        "musicxml": musicxml_content,
+        "exports": {
+            "midi": f"/api/export/{task_id}/midi",
+            "musicxml": f"/api/export/{task_id}/musicxml",
+            "pdf": f"/api/export/{task_id}/pdf",
+            "audio": f"/api/export/{task_id}/audio",
+            "stems": stem_exports
+        }
+    }
+
+
+@app.get("/api/export/{task_id}/stem/{stem_name}")
+def download_stem(task_id: str, stem_name: str):
+    """Download individual separated audio stem (vocals, other, bass, drums)."""
+    task_dir = TEMP_DIR / task_id / "stems"
+    stem_file = task_dir / f"{stem_name}.wav"
+    if not stem_file.exists():
+        # Fallback to general stem name mapping
+        name_map = {"lead": "vocals.wav", "harmony": "other.wav", "bass": "bass.wav", "drums": "drums.wav"}
+        alt_name = name_map.get(stem_name)
+        if alt_name and (task_dir / alt_name).exists():
+            stem_file = task_dir / alt_name
+        else:
+            raise HTTPException(status_code=404, detail="Stem file not found")
+
+    return FileResponse(str(stem_file), media_type="audio/wav", filename=f"{stem_name}_stem.wav")
+

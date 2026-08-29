@@ -239,4 +239,68 @@ class SampleGenerator:
             "description": "Monophonic lyrical melody with expressive phrasing in D Major."
         })
 
+        # 4. Symphonic Orchestral Ensemble (G Major / Multi-Instrument Band)
+        # Combines Flute Lead, Piano Harmony, and Bass
+        orch_lead_notes = [
+            (0.0, 0.45, 67, 0.9),  # G4
+            (0.5, 0.45, 71, 0.9),  # B4
+            (1.0, 0.45, 74, 0.95), # D5
+            (1.5, 0.45, 79, 0.95), # G5
+            (2.0, 0.45, 76, 0.9),  # E5
+            (2.5, 0.45, 74, 0.85), # D5
+            (3.0, 0.45, 71, 0.85), # B4
+            (3.5, 0.80, 67, 0.9),  # G4
+        ]
+        orch_piano_notes = [
+            # G Major chord
+            (0.0, 1.8, 55, 0.8), (0.0, 1.8, 59, 0.8), (0.0, 1.8, 62, 0.8),
+            # C Major chord
+            (2.0, 1.8, 52, 0.8), (2.0, 1.8, 55, 0.8), (2.0, 1.8, 60, 0.8),
+            # G Major resolving
+            (4.0, 2.0, 55, 0.85), (4.0, 2.0, 59, 0.85), (4.0, 2.0, 67, 0.9),
+        ]
+        orch_bass_notes = [
+            (0.0, 1.9, 43, 0.9),   # Low G2
+            (2.0, 1.9, 36, 0.9),   # Low C2
+            (4.0, 2.0, 43, 0.95),  # Low G2
+        ]
+
+        lead_wave = cls.render_track(orch_lead_notes, timbre="flute")
+        piano_wave = cls.render_track(orch_piano_notes, timbre="piano")
+        bass_wave = cls.render_track(orch_bass_notes, timbre="guitar")
+
+        max_len = max(len(lead_wave), len(piano_wave), len(bass_wave))
+        orch_mixed = np.zeros(max_len, dtype=np.float32)
+        orch_mixed[:len(lead_wave)] += lead_wave * 0.45
+        orch_mixed[:len(piano_wave)] += piano_wave * 0.35
+        orch_mixed[:len(bass_wave)] += bass_wave * 0.45
+
+        # Add simulated percussive beat
+        beat_dur = int(0.5 * cls.SR)
+        for b_i in range(0, max_len, beat_dur):
+            hit_len = min(int(0.08 * cls.SR), max_len - b_i)
+            if hit_len > 0:
+                t_hit = np.linspace(0, 0.08, hit_len)
+                kick = (np.sin(2 * np.pi * 65 * np.exp(-30 * t_hit) * t_hit) * np.exp(-25 * t_hit) * 0.3).astype(np.float32)
+                orch_mixed[b_i:b_i + hit_len] += kick
+
+        max_amp = np.max(np.abs(orch_mixed))
+        if max_amp > 1e-6:
+            orch_mixed = (orch_mixed / max_amp * 0.92).astype(np.float32)
+
+        orch_path = os.path.join(output_dir, "sample_orchestra_ensemble.wav")
+        sf.write(orch_path, orch_mixed, cls.SR)
+        samples_info.append({
+            "id": "orchestra_ensemble",
+            "name": "Symphonic Ensemble (Flute, Piano, Bass, Drums)",
+            "instrument": "Full Orchestra / Band",
+            "filename": "sample_orchestra_ensemble.wav",
+            "path": orch_path,
+            "duration": round(len(orch_mixed) / cls.SR, 2),
+            "bpm": 120,
+            "key": "G Major",
+            "description": "Multi-instrument arrangement with Flute lead melody, Grand Piano chords, Acoustic Bass, and Percussion rhythm."
+        })
+
         return samples_info
+
