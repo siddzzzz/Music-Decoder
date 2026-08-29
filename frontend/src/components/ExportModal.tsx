@@ -173,10 +173,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </div>
               <div>
                 <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                  MIDI File (.mid)
+                  {result.is_multitrack ? 'Multi-Track Type-1 MIDI' : 'MIDI File (.mid)'}
                 </h4>
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Standard MIDI sequence for Ableton, FL Studio, Logic Pro
+                  {result.is_multitrack ? 'Separate tracks for Lead, Harmony, Bass, Drums' : 'Standard MIDI sequence for Ableton, FL Studio, Logic Pro'}
                 </p>
               </div>
             </div>
@@ -185,6 +185,34 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <span>Download MIDI</span>
             </div>
           </a>
+
+          {/* Separated Stems Box (If Multi-Track) */}
+          {result.is_multitrack && result.exports.stems && (
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.6)',
+              borderRadius: 12,
+              padding: '12px 16px',
+              border: '1px solid var(--border-active)'
+            }}>
+              <h5 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#c4b5fd', marginBottom: 8 }}>
+                Download Isolated Audio Stems (.wav)
+              </h5>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {Object.entries(result.exports.stems).map(([stemName, stemUrl]) => (
+                  <a
+                    key={stemName}
+                    href={stemUrl}
+                    download={`${stemName}.wav`}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '0.75rem', textDecoration: 'none' }}
+                  >
+                    <Download size={12} />
+                    <span>{stemName.toUpperCase()} WAV</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Direct Print Button */}

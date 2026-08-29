@@ -16,6 +16,8 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
   samples,
   onUploadFile,
   onSelectSample,
+  options,
+  onOptionsChange,
   isLoading,
   loadingMessage,
 }) => {
@@ -148,6 +150,40 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
         <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           Upload any instrumental recording (piano, acoustic guitar, solo winds, violin, synths) and our AI neural network will transcribe polyphonic notes, quantize the rhythm, and engrave interactive sheet music with downloadable PDF, MusicXML, and MIDI.
         </p>
+      </div>
+
+      {/* Mode Selector Pill */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        background: 'rgba(15, 23, 42, 0.85)',
+        padding: 6,
+        borderRadius: 9999,
+        border: '1px solid var(--border-active)',
+        width: 'fit-content',
+        margin: '0 auto',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.5)'
+      }}>
+        <button
+          type="button"
+          className={`btn ${options.mode === 'single' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ padding: '8px 20px', borderRadius: 9999, fontSize: '0.85rem' }}
+          onClick={() => onOptionsChange({ ...options, mode: 'single' })}
+        >
+          <span>Solo / Polyphonic Instrument</span>
+        </button>
+
+        <button
+          type="button"
+          className={`btn ${options.mode === 'multitrack' ? 'btn-cyan' : 'btn-secondary'}`}
+          style={{ padding: '8px 20px', borderRadius: 9999, fontSize: '0.85rem' }}
+          onClick={() => onOptionsChange({ ...options, mode: 'multitrack' })}
+        >
+          <Sparkles size={14} />
+          <span>Full Song & Orchestra (Demucs AI Stems)</span>
+        </button>
       </div>
 
       {/* Main Upload Dropzone */}

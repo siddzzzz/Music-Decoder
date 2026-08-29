@@ -158,17 +158,27 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       const isHovered = hoveredNote === note;
       const isCurrentlyPlaying = isPlaying && playheadTime >= note.start && playheadTime <= note.end;
 
-      // Note Color based on velocity
-      const hue = 260 + (note.velocity / 127) * 40;
+      // Note Color based on track or velocity
+      const trackColors: Record<string, string> = {
+        lead: '#06b6d4',
+        harmony: '#a855f7',
+        bass: '#10b981',
+        drums: '#f59e0b'
+      };
+
       if (isCurrentlyPlaying) {
-        ctx.fillStyle = '#38bdf8';
+        ctx.fillStyle = '#ffffff';
         ctx.shadowColor = '#06b6d4';
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 14;
       } else if (isHovered) {
-        ctx.fillStyle = '#a855f7';
-        ctx.shadowColor = '#c084fc';
-        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#f43f5e';
+        ctx.shadowColor = '#f43f5e';
+        ctx.shadowBlur = 10;
+      } else if (note.track && trackColors[note.track]) {
+        ctx.fillStyle = trackColors[note.track];
+        ctx.shadowBlur = 0;
       } else {
+        const hue = 260 + (note.velocity / 127) * 40;
         ctx.fillStyle = `hsla(${hue}, 85%, 65%, 0.85)`;
         ctx.shadowBlur = 0;
       }

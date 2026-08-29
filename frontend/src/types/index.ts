@@ -6,6 +6,8 @@ export interface NoteEvent {
   duration: number;
   velocity: number;
   amplitude: number;
+  track?: string;
+  instrument?: string;
 }
 
 export interface KeySignatureInfo {
@@ -20,22 +22,35 @@ export interface TranscriptionExports {
   musicxml: string;
   pdf: string;
   audio: string;
+  stems?: Record<string, string>;
+}
+
+export interface StemTrackInfo {
+  name: string;
+  instrument: string;
+  notes_count: number;
+  notes: NoteEvent[];
+  waveform: number[];
+  audio_path: string;
 }
 
 export interface TranscriptionResult {
   task_id: string;
+  is_multitrack?: boolean;
+  device?: string;
   filename: string;
   duration: number;
   tempo: number;
-  detected_tempo: number;
+  detected_tempo?: number;
   key: KeySignatureInfo;
   time_signature: string;
-  clef_mode: string;
+  clef_mode?: string;
   quantization_grid: string;
   notes_count: number;
   notes: NoteEvent[];
   waveform: number[];
   beat_times: number[];
+  tracks?: Record<string, StemTrackInfo>;
   musicxml: string;
   exports: TranscriptionExports;
 }
@@ -53,6 +68,7 @@ export interface SampleTrack {
 }
 
 export interface TranscriptionOptions {
+  mode: 'single' | 'multitrack';
   onset_threshold: number;
   frame_threshold: number;
   minimum_note_length: number;

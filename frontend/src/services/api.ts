@@ -28,11 +28,7 @@ export async function transcribeAudioFile(
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
   formData.append('audio_file', file);
-  formData.append('onset_threshold', options.onset_threshold.toString());
-  formData.append('frame_threshold', options.frame_threshold.toString());
-  formData.append('minimum_note_length', options.minimum_note_length.toString());
   formData.append('quantization_grid', options.quantization_grid);
-  formData.append('clef_mode', options.clef_mode);
   formData.append('time_signature', options.time_signature);
   
   if (options.bpm_override) {
@@ -47,7 +43,16 @@ export async function transcribeAudioFile(
   if (title) formData.append('title', title);
   if (composer) formData.append('composer', composer);
 
-  const res = await fetch(`${API_BASE}/transcribe`, {
+  const endpoint = options.mode === 'multitrack' ? `${API_BASE}/transcribe-multitrack` : `${API_BASE}/transcribe`;
+
+  if (options.mode !== 'multitrack') {
+    formData.append('onset_threshold', options.onset_threshold.toString());
+    formData.append('frame_threshold', options.frame_threshold.toString());
+    formData.append('minimum_note_length', options.minimum_note_length.toString());
+    formData.append('clef_mode', options.clef_mode);
+  }
+
+  const res = await fetch(endpoint, {
     method: 'POST',
     body: formData,
   });
@@ -66,11 +71,7 @@ export async function transcribeSampleTrack(
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
   formData.append('sample_id', sampleId);
-  formData.append('onset_threshold', options.onset_threshold.toString());
-  formData.append('frame_threshold', options.frame_threshold.toString());
-  formData.append('minimum_note_length', options.minimum_note_length.toString());
   formData.append('quantization_grid', options.quantization_grid);
-  formData.append('clef_mode', options.clef_mode);
   formData.append('time_signature', options.time_signature);
 
   if (options.bpm_override) {
@@ -83,7 +84,16 @@ export async function transcribeSampleTrack(
     formData.append('key_mode_override', options.key_mode_override);
   }
 
-  const res = await fetch(`${API_BASE}/transcribe-sample`, {
+  const endpoint = options.mode === 'multitrack' ? `${API_BASE}/transcribe-sample-multitrack` : `${API_BASE}/transcribe-sample`;
+
+  if (options.mode !== 'multitrack') {
+    formData.append('onset_threshold', options.onset_threshold.toString());
+    formData.append('frame_threshold', options.frame_threshold.toString());
+    formData.append('minimum_note_length', options.minimum_note_length.toString());
+    formData.append('clef_mode', options.clef_mode);
+  }
+
+  const res = await fetch(endpoint, {
     method: 'POST',
     body: formData,
   });

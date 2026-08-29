@@ -6,7 +6,9 @@ import {
   Layers,
   ListFilter,
   ArrowLeft,
-  CheckCircle2
+  CheckCircle2,
+  Sliders,
+  Cpu
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions } from './types';
@@ -19,6 +21,7 @@ import { WaveformVisualizer } from './components/WaveformVisualizer';
 import { ControlPanel } from './components/ControlPanel';
 import { NotesTable } from './components/NotesTable';
 import { ExportModal } from './components/ExportModal';
+import { StemMixer } from './components/StemMixer';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -29,10 +32,11 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'pianoroll' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
 
   const [options, setOptions] = useState<TranscriptionOptions>({
+    mode: 'single',
     onset_threshold: 0.5,
     frame_threshold: 0.3,
     minimum_note_length: 58.0,
@@ -68,8 +72,8 @@ export const App: React.FC = () => {
   const triggerConfetti = () => {
     try {
       confetti({
-        particleCount: 80,
-        spread: 70,
+        particleCount: 90,
+        spread: 75,
         origin: { y: 0.6 },
         colors: ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b']
       });
@@ -80,13 +84,18 @@ export const App: React.FC = () => {
 
   const handleUploadFile = async (file: File) => {
     setIsLoading(true);
-    setLoadingMessage(`Analyzing audio & transcribing "${file.name}"...`);
+    setLoadingMessage(
+      options.mode === 'multitrack'
+        ? `Running Demucs AI stem separation & orchestral transcription on "${file.name}" (CUDA GPU)...`
+        : `Analyzing audio & transcribing "${file.name}"...`
+    );
     setLastUploadedFile(file);
     setLastSampleId(null);
 
     try {
       const res = await transcribeAudioFile(file, options, file.name.replace(/\.[^/.]+$/, ''));
       setResult(res);
+      if (res.is_multitrack) setActiveTab('score');
       triggerConfetti();
     } catch (err: any) {
       alert(`Error transcribing audio: ${err.message || 'Unknown error'}`);
@@ -99,13 +108,20 @@ export const App: React.FC = () => {
   const handleSelectSample = async (sampleId: string) => {
     setIsLoading(true);
     const target = samples.find(s => s.id === sampleId);
-    setLoadingMessage(`Running AI neural transcription on ${target?.name || 'sample'}...`);
+    setLoadingMessage(
+      options.mode === 'multitrack' || sampleId === 'orchestra_ensemble'
+        ? `Running Neural Stem Separation (CUDA) on ${target?.name || 'sample'}...`
+        : `Running AI neural transcription on ${target?.name || 'sample'}...`
+    );
     setLastSampleId(sampleId);
     setLastUploadedFile(null);
 
     try {
-      const res = await transcribeSampleTrack(sampleId, options);
+      // If sample is orchestral ensemble, automatically enable multitrack
+      const effectiveOptions = sampleId === 'orchestra_ensemble' ? { ...options, mode: 'multitrack' as const } : options;
+      const res = await transcribeSampleTrack(sampleId, effectiveOptions);
       setResult(res);
+      if (res.is_multitrack) setActiveTab('score');
       triggerConfetti();
     } catch (err: any) {
       alert(`Error transcribing sample: ${err.message || 'Unknown error'}`);
@@ -175,10 +191,10 @@ export const App: React.FC = () => {
               justifyContent: 'space-between',
               flexWrap: 'wrap',
               gap: 14,
-              borderLeft: '4px solid var(--accent-purple)'
+              borderLeft: result.is_multitrack ? '4px solid var(--accent-cyan)' : '4px solid var(--accent-purple)'
             }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                   <button
                     onClick={handleReset}
                     className="btn btn-secondary"
@@ -187,14 +203,24 @@ export const App: React.FC = () => {
                     <ArrowLeft size={13} />
                     <span>Upload New</span>
                   </button>
-                  <span className="badge badge-purple" style={{ fontSize: '0.7rem' }}>
+
+                  <span className={result.is_multitrack ? "badge badge-cyan" : "badge badge-purple"} style={{ fontSize: '0.7rem' }}>
                     <CheckCircle2 size={12} />
-                    Transcribed Successfully
+                    {result.is_multitrack ? 'Orchestral Conductor Score' : 'Solo Transcribed Score'}
                   </span>
+
+                  {result.device && (
+                    <span className="badge badge-emerald" style={{ fontSize: '0.68rem' }}>
+                      <Cpu size={11} />
+                      <span>{result.device.toUpperCase()} ACCELERATED</span>
+                    </span>
+                  )}
+
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                     {result.notes_count} Notes Detected
                   </span>
                 </div>
+
                 <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
                   {result.filename}
                 </h2>
@@ -226,7 +252,8 @@ export const App: React.FC = () => {
               padding: 4,
               borderRadius: 12,
               border: '1px solid var(--border-subtle)',
-              width: 'fit-content'
+              width: 'fit-content',
+              flexWrap: 'wrap'
             }}>
               <button
                 className={`btn ${activeTab === 'score' ? 'btn-primary' : 'btn-secondary'}`}
@@ -234,8 +261,19 @@ export const App: React.FC = () => {
                 onClick={() => setActiveTab('score')}
               >
                 <FileMusic size={16} />
-                <span>Sheet Music Score</span>
+                <span>{result.is_multitrack ? "Conductor's Score" : "Sheet Music Score"}</span>
               </button>
+
+              {result.is_multitrack && (
+                <button
+                  className={`btn ${activeTab === 'mixer' ? 'btn-cyan' : 'btn-secondary'}`}
+                  style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+                  onClick={() => setActiveTab('mixer')}
+                >
+                  <Sliders size={16} />
+                  <span>AI Stem Mixer (4 Staves)</span>
+                </button>
+              )}
 
               <button
                 className={`btn ${activeTab === 'pianoroll' ? 'btn-primary' : 'btn-secondary'}`}
@@ -243,7 +281,7 @@ export const App: React.FC = () => {
                 onClick={() => setActiveTab('pianoroll')}
               >
                 <Layers size={16} />
-                <span>Interactive Piano Roll</span>
+                <span>Multi-Track Piano Roll</span>
               </button>
 
               <button
@@ -252,7 +290,7 @@ export const App: React.FC = () => {
                 onClick={() => setActiveTab('waveform')}
               >
                 <Activity size={16} />
-                <span>Audio Waveform & Beats</span>
+                <span>Waveform & Beat Grid</span>
               </button>
 
               <button
@@ -268,6 +306,10 @@ export const App: React.FC = () => {
             {/* Tab Views */}
             {activeTab === 'score' && (
               <ScoreViewer result={result} />
+            )}
+
+            {activeTab === 'mixer' && result.is_multitrack && (
+              <StemMixer result={result} />
             )}
 
             {activeTab === 'pianoroll' && (
