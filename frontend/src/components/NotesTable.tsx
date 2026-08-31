@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
-import { Play, Search, Music, Activity, Hash, BarChart3 } from 'lucide-react';
-import type { TranscriptionResult } from '../types';
-import { synth } from '../services/synth';
+import { Play, Search, Music, Activity, Hash, BarChart3, Edit3, Trash2 } from 'lucide-react';
+import type { TranscriptionResult, NoteEvent } from '../types';
+import { soundfontService } from '../services/soundfont';
 
 interface NotesTableProps {
   result: TranscriptionResult;
+  onEditNote?: (note: NoteEvent) => void;
+  onDeleteNote?: (note: NoteEvent) => void;
 }
 
-export const NotesTable: React.FC<NotesTableProps> = ({ result }) => {
+export const NotesTable: React.FC<NotesTableProps> = ({
+  result,
+  onEditNote,
+  onDeleteNote
+}) => {
   const [search, setSearch] = useState('');
   const notes = result.notes || [];
 
@@ -16,7 +22,8 @@ export const NotesTable: React.FC<NotesTableProps> = ({ result }) => {
 
   const filteredNotes = notes.filter(n =>
     n.name.toLowerCase().includes(search.toLowerCase()) ||
-    n.pitch.toString().includes(search)
+    n.pitch.toString().includes(search) ||
+    (n.track && n.track.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -74,27 +81,42 @@ export const NotesTable: React.FC<NotesTableProps> = ({ result }) => {
         </div>
       </div>
 
-      {/* Note List Table */}
-      <div className="glass-panel" style={{ padding: 20, borderRadius: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Transcribed Note Events Stream
-          </h3>
+      {/* Main Table Container */}
+      <div className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Transcribed Note Events Stream
+            </h3>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Click any note row to edit or delete false positive transients
+            </p>
+          </div>
 
           <div style={{ position: 'relative', width: 240 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-secondary)' }} />
             <input
               type="text"
-              placeholder="Search note name (e.g. C4, F#5)..."
+              placeholder="Search note (e.g. C4, lead)..."
               className="input-control"
-              style={{ paddingLeft: 30, fontSize: '0.8rem' }}
+              style={{
+                paddingLeft: 30,
+                fontSize: '0.8rem',
+                background: 'rgba(15, 23, 42, 0.8)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 8,
+                color: '#ffffff',
+                width: '100%',
+                paddingTop: 6,
+                paddingBottom: 6
+              }}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
         </div>
 
-        <div style={{ maxHeight: 380, overflowY: 'auto', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
+        <div style={{ maxHeight: 420, overflowY: 'auto', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
             <thead>
               <tr style={{ background: 'rgba(15, 23, 42, 0.95)', position: 'sticky', top: 0, textAlign: 'left', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -103,8 +125,8 @@ export const NotesTable: React.FC<NotesTableProps> = ({ result }) => {
                 <th style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>MIDI Pitch</th>
                 <th style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>Start Time</th>
                 <th style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>Duration</th>
-                <th style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>Velocity</th>
-                <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', textAlign: 'right' }}>Audition</th>
+                <th style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>Track / Staff</th>
+                <th style={{ padding: '10px 14px', color: 'var(--text-secondary)', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -125,32 +147,50 @@ export const NotesTable: React.FC<NotesTableProps> = ({ result }) => {
                   <td style={{ padding: '8px 14px', fontFamily: 'var(--font-mono)' }}>{n.start.toFixed(2)}s</td>
                   <td style={{ padding: '8px 14px', fontFamily: 'var(--font-mono)' }}>{n.duration.toFixed(2)}s</td>
                   <td style={{ padding: '8px 14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{
-                        width: 50,
-                        height: 6,
-                        background: 'rgba(255, 255, 255, 0.1)',
-                        borderRadius: 3,
-                        overflow: 'hidden'
-                      }}>
-                        <div style={{
-                          width: `${(n.velocity / 127) * 100}%`,
-                          height: '100%',
-                          background: 'linear-gradient(to right, #8b5cf6, #06b6d4)'
-                        }} />
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{n.velocity}</span>
-                    </div>
+                    {n.track ? (
+                      <span className="badge badge-purple" style={{ fontSize: '0.68rem' }}>
+                        {n.track.toUpperCase()}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Master</span>
+                    )}
                   </td>
                   <td style={{ padding: '8px 14px', textAlign: 'right' }}>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                      onClick={() => synth.playNote(n.pitch, n.velocity, Math.max(0.2, n.duration))}
-                      title="Play note sound"
-                    >
-                      <Play size={12} fill="#06b6d4" color="#06b6d4" />
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                      {/* Play Sound */}
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                        onClick={() => soundfontService.playNote(n.pitch, Math.max(0.2, n.duration), n.velocity)}
+                        title="Audition note"
+                      >
+                        <Play size={12} fill="#06b6d4" color="#06b6d4" />
+                      </button>
+
+                      {/* Edit Note */}
+                      {onEditNote && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                          onClick={() => onEditNote(n)}
+                          title="Edit note"
+                        >
+                          <Edit3 size={12} color="#a855f7" />
+                        </button>
+                      )}
+
+                      {/* Delete Note */}
+                      {onDeleteNote && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', background: 'rgba(239, 68, 68, 0.1)' }}
+                          onClick={() => onDeleteNote(n)}
+                          title="Delete note"
+                        >
+                          <Trash2 size={12} color="#f87171" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
-import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Music, Gauge } from 'lucide-react';
+import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Gauge, Sparkles } from 'lucide-react';
 import type { TranscriptionResult } from '../types';
-import { synth } from '../services/synth';
+import { soundfontService, type SoundfontInstrumentName } from '../services/soundfont';
 
 interface ScoreViewerProps {
   result: TranscriptionResult;
@@ -16,14 +16,18 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
   const [zoom, setZoom] = useState(1.0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [transpose, setTranspose] = useState(0);
-  const [isMetronomeActive, setIsMetronomeActive] = useState(false);
-  const [playMode, setPlayMode] = useState<'synth' | 'audio'>('synth');
+  const [playMode, setPlayMode] = useState<'soundfont' | 'audio'>('soundfont');
+  const [instrument, setInstrument] = useState<SoundfontInstrumentName>('acoustic_grand_piano');
   const [currentTime, setCurrentTime] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playTimerRef = useRef<number | null>(null);
-  const metronomeTimerRef = useRef<number | null>(null);
   const playedNoteIndicesRef = useRef<Set<number>>(new Set());
+
+  // Load selected SoundFont instrument
+  useEffect(() => {
+    soundfontService.setInstrument(instrument);
+  }, [instrument]);
 
   // Initialize or re-render OSMD whenever result or transpose/zoom changes
   useEffect(() => {
@@ -77,9 +81,8 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
   useEffect(() => {
     if (!isPlaying) {
       if (playTimerRef.current) clearInterval(playTimerRef.current);
-      if (metronomeTimerRef.current) clearInterval(metronomeTimerRef.current);
       if (audioRef.current) audioRef.current.pause();
-      synth.stopAll();
+      soundfontService.stop();
       return;
     }
 
@@ -106,14 +109,14 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
         return;
       }
 
-      // Synthesize note events
-      if (playMode === 'synth') {
+      // Synthesize note events with authentic SoundFont
+      if (playMode === 'soundfont') {
         result.notes.forEach((note, idx) => {
           if (!playedNoteIndicesRef.current.has(idx)) {
             if (elapsedSec >= note.start && elapsedSec <= note.start + 0.08) {
               playedNoteIndicesRef.current.add(idx);
               const transposedPitch = note.pitch + transpose;
-              synth.playNote(transposedPitch, note.velocity, note.duration / playbackSpeed);
+              soundfontService.playNote(transposedPitch, note.duration / playbackSpeed, note.velocity);
             }
           }
         });
@@ -126,30 +129,18 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
         if (totalNotes > 0) {
           const currentNoteIdx = result.notes.findIndex(n => n.start >= elapsedSec);
           if (currentNoteIdx > 0 && !cursor.iterator.EndReached) {
-            // Smoothly move cursor forward
             cursor.next();
           }
         }
       }
     }, intervalMs);
 
-    // Metronome Click Timer
-    if (isMetronomeActive) {
-      const beatIntervalMs = (60.0 / (result.tempo * playbackSpeed)) * 1000;
-      let beatCount = 0;
-      metronomeTimerRef.current = window.setInterval(() => {
-        synth.playMetronomeClick(beatCount % 4 === 0);
-        beatCount++;
-      }, beatIntervalMs);
-    }
-
     return () => {
       if (playTimerRef.current) clearInterval(playTimerRef.current);
-      if (metronomeTimerRef.current) clearInterval(metronomeTimerRef.current);
       if (audioRef.current) audioRef.current.pause();
-      synth.stopAll();
+      soundfontService.stop();
     };
-  }, [isPlaying, playbackSpeed, isMetronomeActive, playMode, transpose]);
+  }, [isPlaying, currentTime, playbackSpeed, playMode, transpose, result.notes, result.duration, result.exports.audio]);
 
   const handlePlayToggle = () => {
     setIsPlaying(p => !p);
@@ -158,8 +149,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
   const handleStop = () => {
     setIsPlaying(false);
     setCurrentTime(0);
-    playedNoteIndicesRef.current.clear();
-    synth.stopAll();
+    soundfontService.stop();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -218,8 +208,8 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
           </div>
         </div>
 
-        {/* Audio Mode & Metronome */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Audio Mode & Realistic SoundFont Instrument Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{
             display: 'flex',
             background: 'rgba(15, 23, 42, 0.8)',
@@ -228,12 +218,12 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
             border: '1px solid var(--border-subtle)'
           }}>
             <button
-              className={`btn ${playMode === 'synth' ? 'btn-primary' : 'btn-secondary'}`}
+              className={`btn ${playMode === 'soundfont' ? 'btn-primary' : 'btn-secondary'}`}
               style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6 }}
-              onClick={() => setPlayMode('synth')}
+              onClick={() => setPlayMode('soundfont')}
             >
-              <Music size={12} />
-              <span>AI Synth</span>
+              <Sparkles size={12} />
+              <span>SoundFont Playback</span>
             </button>
             <button
               className={`btn ${playMode === 'audio' ? 'btn-cyan' : 'btn-secondary'}`}
@@ -245,70 +235,99 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
             </button>
           </div>
 
-          <button
-            className={`btn ${isMetronomeActive ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ padding: '6px 10px', fontSize: '0.8rem' }}
-            onClick={() => setIsMetronomeActive(!isMetronomeActive)}
-            title="Toggle Metronome Click"
-          >
-            <span>Metronome {isMetronomeActive ? 'ON' : 'OFF'}</span>
-          </button>
-        </div>
-
-        {/* Zoom, Transpose & Speed Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Speed Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}>
-            <Gauge size={14} color="var(--text-secondary)" />
+          {/* SoundFont Instrument Dropdown */}
+          {playMode === 'soundfont' && (
             <select
-              className="select-control"
-              style={{ width: 'auto', padding: '4px 8px', fontSize: '0.8rem' }}
-              value={playbackSpeed}
-              onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
+              value={instrument}
+              onChange={(e) => setInstrument(e.target.value as SoundfontInstrumentName)}
+              className="input-control"
+              style={{
+                fontSize: '0.78rem',
+                padding: '5px 10px',
+                background: 'rgba(15, 23, 42, 0.8)',
+                border: '1px solid var(--border-subtle)',
+                color: '#ffffff',
+                borderRadius: 8
+              }}
             >
-              <option value={0.5}>0.5x Speed</option>
-              <option value={0.75}>0.75x Speed</option>
-              <option value={1.0}>1.0x (Normal)</option>
-              <option value={1.25}>1.25x Speed</option>
-              <option value={1.5}>1.5x Speed</option>
+              <option value="acoustic_grand_piano">🎹 Steinway Grand Piano</option>
+              <option value="acoustic_guitar_nylon">🎸 Acoustic Guitar</option>
+              <option value="violin">🎻 Violin / Strings</option>
+              <option value="flute">🪈 Flute / Winds</option>
+              <option value="electric_bass_finger">🎸 Electric Bass</option>
+            </select>
+          )}
+
+          {/* Playback Speed */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Gauge size={14} color="#94a3b8" />
+            <select
+              value={playbackSpeed}
+              onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+              className="input-control"
+              style={{ fontSize: '0.78rem', padding: '4px 8px', width: 75 }}
+            >
+              <option value={0.5}>0.5x</option>
+              <option value={0.75}>0.75x</option>
+              <option value={1.0}>1.0x</option>
+              <option value={1.25}>1.25x</option>
+              <option value={1.5}>1.5x</option>
             </select>
           </div>
+        </div>
 
-          {/* Transpose */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Pitch:</span>
-            <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => handleTranspose(-1)}>-1</button>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', minWidth: 28, textAlign: 'center' }}>
-              {transpose > 0 ? `+${transpose}` : transpose}
+        {/* Transpose & Zoom Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Transposition */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(15, 23, 42, 0.8)',
+            padding: '2px 8px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.8rem'
+          }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Pitch:</span>
+            <button className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => handleTranspose(-1)}>-</button>
+            <span style={{ fontFamily: 'var(--font-mono)', minWidth: 28, textAlign: 'center', color: transpose !== 0 ? '#38bdf8' : 'var(--text-primary)' }}>
+              {transpose > 0 ? `+${transpose}` : transpose} st
             </span>
-            <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => handleTranspose(1)}>+1</button>
+            <button className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => handleTranspose(1)}>+</button>
           </div>
 
-          {/* Zoom Buttons */}
+          {/* Zoom */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => handleZoom(-0.1)} title="Zoom Out">
+            <button className="btn btn-secondary" style={{ padding: 6 }} onClick={() => handleZoom(-0.1)} title="Zoom Out">
               <ZoomOut size={14} />
             </button>
             <span style={{ fontSize: '0.78rem', fontFamily: 'var(--font-mono)', minWidth: 36, textAlign: 'center' }}>
               {Math.round(zoom * 100)}%
             </span>
-            <button className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => handleZoom(0.1)} title="Zoom In">
+            <button className="btn btn-secondary" style={{ padding: 6 }} onClick={() => handleZoom(0.1)} title="Zoom In">
               <ZoomIn size={14} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Sheet Music Score Rendering Container */}
+      {/* Sheet Music Score Paper Container */}
       <div
-        id="sheet-music-render-area"
-        className="osmd-canvas-container"
-        ref={containerRef}
+        className="glass-panel glow-purple"
         style={{
-          boxShadow: '0 12px 36px -10px rgba(0, 0, 0, 0.7)',
+          background: '#ffffff',
+          borderRadius: 16,
+          padding: '28px 24px',
+          minHeight: 520,
+          overflowX: 'auto',
+          overflowY: 'visible',
+          boxShadow: '0 10px 40px -10px rgba(0, 0, 0, 0.7)',
           position: 'relative'
         }}
-      />
+      >
+        <div ref={containerRef} style={{ width: '100%' }} />
+      </div>
     </div>
   );
 };

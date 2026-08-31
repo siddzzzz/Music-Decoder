@@ -105,3 +105,34 @@ export async function transcribeSampleTrack(
 
   return res.json();
 }
+
+export async function reQuantizeScore(payload: {
+  task_id: string;
+  notes: any[];
+  bpm: number;
+  time_signature: string;
+  key_tonic: string;
+  key_mode: string;
+  clef_mode: string;
+  quantization_grid: string;
+  title?: string;
+  composer?: string;
+  is_multitrack?: boolean;
+  tracks?: Record<string, any>;
+}): Promise<TranscriptionResult> {
+  const res = await fetch(`${API_BASE}/re-quantize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to re-quantize edited notes.');
+  }
+
+  return res.json();
+}
+

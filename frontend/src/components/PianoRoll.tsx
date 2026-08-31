@@ -1,19 +1,34 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Play, Pause, Square } from 'lucide-react';
 import type { TranscriptionResult, NoteEvent } from '../types';
-import { synth } from '../services/synth';
+import { soundfontService } from '../services/soundfont';
 
 interface PianoRollProps {
   result: TranscriptionResult;
+  onEditNote?: (note: NoteEvent) => void;
+  onAddNote?: (newNote: NoteEvent) => void;
 }
 
-export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
+const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+function midiToName(pitch: number): string {
+  const noteName = PITCH_NAMES[pitch % 12];
+  const octave = Math.floor(pitch / 12) - 1;
+  return `${noteName}${octave}`;
+}
+
+export const PianoRoll: React.FC<PianoRollProps> = ({
+  result,
+  onEditNote,
+  onAddNote
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoveredNote, setHoveredNote] = useState<NoteEvent | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playheadTime, setPlayheadTime] = useState(0);
 
   const notes = result.notes || [];
+  const chords = result.chords || [];
   const duration = Math.max(1, result.duration || 10);
   const playTimerRef = useRef<number | null>(null);
   const playedNoteIndicesRef = useRef<Set<number>>(new Set());
@@ -23,13 +38,11 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
   const maxPitch = notes.length > 0 ? Math.min(108, Math.max(...notes.map(n => n.pitch)) + 3) : 84;
   const pitchCount = Math.max(12, maxPitch - minPitch + 1);
 
-  const keyNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
   // Playback timer
   useEffect(() => {
     if (!isPlaying) {
       if (playTimerRef.current) clearInterval(playTimerRef.current);
-      synth.stopAll();
+      soundfontService.stop();
       return;
     }
 
@@ -43,7 +56,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       if (elapsedSec >= duration) {
         setIsPlaying(false);
         setPlayheadTime(0);
-        synth.stopAll();
+        soundfontService.stop();
         return;
       }
 
@@ -51,7 +64,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
         if (!playedNoteIndicesRef.current.has(idx)) {
           if (elapsedSec >= note.start && elapsedSec <= note.start + 0.08) {
             playedNoteIndicesRef.current.add(idx);
-            synth.playNote(note.pitch, note.velocity, note.duration);
+            soundfontService.playNote(note.pitch, note.duration, note.velocity);
           }
         }
       });
@@ -59,9 +72,9 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
 
     return () => {
       if (playTimerRef.current) clearInterval(playTimerRef.current);
-      synth.stopAll();
+      soundfontService.stop();
     };
-  }, [isPlaying, duration, notes]);
+  }, [isPlaying, playheadTime, duration, notes]);
 
   const handleTogglePlay = () => {
     setIsPlaying(p => !p);
@@ -70,10 +83,10 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
   const handleStop = () => {
     setIsPlaying(false);
     setPlayheadTime(0);
-    playedNoteIndicesRef.current.clear();
-    synth.stopAll();
+    soundfontService.stop();
   };
 
+  // Canvas drawing
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -83,24 +96,39 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
     const width = canvas.width;
     const height = canvas.height;
     const keyboardWidth = 55;
+    const chordHeaderHeight = 24;
+    const rollHeight = height - chordHeaderHeight;
     const rollWidth = width - keyboardWidth;
-    const noteHeight = height / pitchCount;
+    const noteHeight = rollHeight / pitchCount;
 
-    // Clear background
+    // Clear canvas
     ctx.fillStyle = '#0a0f1d';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw Grid & Piano Keys
-    for (let p = minPitch; p <= maxPitch; p++) {
-      const pitchIdx = maxPitch - p;
-      const y = pitchIdx * noteHeight;
-      const noteInOctave = p % 12;
-      const isBlackKey = [1, 3, 6, 8, 10].includes(noteInOctave);
-      const octave = Math.floor(p / 12) - 1;
-      const name = `${keyNames[noteInOctave]}${octave}`;
+    // Draw Chord Header Bar
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, width, chordHeaderHeight);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.beginPath();
+    ctx.moveTo(0, chordHeaderHeight);
+    ctx.lineTo(width, chordHeaderHeight);
+    ctx.stroke();
 
-      // Row background
-      ctx.fillStyle = isBlackKey ? 'rgba(15, 23, 42, 0.6)' : 'rgba(30, 41, 59, 0.25)';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 10px Outfit, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('CHORDS', 8, 16);
+
+    // Draw Piano Keys and Horizontal Grid
+    for (let i = 0; i < pitchCount; i++) {
+      const pitch = maxPitch - i;
+      const y = chordHeaderHeight + i * noteHeight;
+      const pc = pitch % 12;
+      const isBlackKey = [1, 3, 6, 8, 10].includes(pc);
+      const name = midiToName(pitch);
+
+      // Horizontal note row background
+      ctx.fillStyle = isBlackKey ? 'rgba(15, 23, 42, 0.7)' : 'rgba(30, 41, 59, 0.3)';
       ctx.fillRect(keyboardWidth, y, rollWidth, noteHeight);
 
       // Horizontal grid line
@@ -122,13 +150,14 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       ctx.fillText(name, keyboardWidth - 6, y + (noteHeight / 2) + 3);
     }
 
-    // Draw Vertical Beat Lines
+    // Draw Vertical Beat Lines & Measure Chords
     const beatInterval = 60.0 / result.tempo;
     const totalBeats = Math.ceil(duration / beatInterval);
     for (let b = 0; b <= totalBeats; b++) {
       const beatTime = b * beatInterval;
       const x = keyboardWidth + (beatTime / duration) * rollWidth;
       const isMeasure = b % 4 === 0;
+      const measureNum = Math.floor(b / 4) + 1;
 
       ctx.strokeStyle = isMeasure ? 'rgba(139, 92, 246, 0.35)' : 'rgba(255, 255, 255, 0.06)';
       ctx.lineWidth = isMeasure ? 1.5 : 0.8;
@@ -137,11 +166,20 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       ctx.lineTo(x, height);
       ctx.stroke();
 
-      if (isMeasure && x < width - 20) {
-        ctx.fillStyle = '#c4b5fd';
-        ctx.font = '10px Outfit, sans-serif';
+      if (isMeasure) {
+        // Measure label
+        ctx.fillStyle = '#64748b';
+        ctx.font = '9px var(--font-mono)';
         ctx.textAlign = 'left';
-        ctx.fillText(`M${(b / 4) + 1}`, x + 4, 14);
+        ctx.fillText(`M${measureNum}`, x + 4, 16);
+
+        // Find chord for this measure
+        const matchChord = chords.find(c => c.measure === measureNum);
+        if (matchChord) {
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = 'bold 11px Outfit, sans-serif';
+          ctx.fillText(matchChord.figure, x + 24, 16);
+        }
       }
     }
 
@@ -150,7 +188,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       if (note.pitch < minPitch || note.pitch > maxPitch) return;
 
       const pitchIdx = maxPitch - note.pitch;
-      const y = pitchIdx * noteHeight + 1;
+      const y = chordHeaderHeight + pitchIdx * noteHeight + 1;
       const x = keyboardWidth + (note.start / duration) * rollWidth;
       const w = Math.max(4, (note.duration / duration) * rollWidth);
       const h = noteHeight - 2;
@@ -188,15 +226,12 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      ctx.strokeStyle = isCurrentlyPlaying ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      if (w > 20) {
+      // Note Name text inside note rectangle
+      if (w > 22 && h > 9) {
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 9px JetBrains Mono, monospace';
+        ctx.font = '9px Outfit, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(note.name, x + 4, y + (h / 2) + 3);
+        ctx.fillText(note.name, x + 3, y + (h / 2) + 3);
       }
     });
 
@@ -212,29 +247,31 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
 
       ctx.fillStyle = '#f43f5e';
       ctx.beginPath();
-      ctx.arc(playheadX, 6, 5, 0, Math.PI * 2);
+      ctx.arc(playheadX, chordHeaderHeight, 5, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [result, notes, minPitch, maxPitch, pitchCount, hoveredNote, isPlaying, playheadTime, duration]);
+  }, [result, notes, chords, minPitch, maxPitch, pitchCount, hoveredNote, isPlaying, playheadTime, duration]);
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
 
     const keyboardWidth = 55;
+    const chordHeaderHeight = 24;
+    const rollHeight = canvas.height - chordHeaderHeight;
     const rollWidth = canvas.width - keyboardWidth;
-    const noteHeight = canvas.height / pitchCount;
+    const noteHeight = rollHeight / pitchCount;
 
-    if (x < keyboardWidth) {
+    if (x < keyboardWidth || y < chordHeaderHeight) {
       setHoveredNote(null);
       return;
     }
 
     const mouseTime = ((x - keyboardWidth) / rollWidth) * duration;
-    const mousePitchIdx = Math.floor(y / noteHeight);
+    const mousePitchIdx = Math.floor((y - chordHeaderHeight) / noteHeight);
     const mousePitch = maxPitch - mousePitchIdx;
 
     const matched = notes.find(n => n.pitch === mousePitch && mouseTime >= n.start && mouseTime <= n.end);
@@ -245,33 +282,74 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
 
     const keyboardWidth = 55;
+    const chordHeaderHeight = 24;
+    const rollHeight = canvas.height - chordHeaderHeight;
     const rollWidth = canvas.width - keyboardWidth;
-    const noteHeight = canvas.height / pitchCount;
+    const noteHeight = rollHeight / pitchCount;
 
     if (x <= keyboardWidth) {
-      const pitchIdx = Math.floor(y / noteHeight);
-      const clickedPitch = maxPitch - pitchIdx;
-      synth.playNote(clickedPitch, 90, 0.4);
-    } else {
-      const seekTime = ((x - keyboardWidth) / rollWidth) * duration;
-      setPlayheadTime(seekTime);
+      if (y >= chordHeaderHeight) {
+        const pitchIdx = Math.floor((y - chordHeaderHeight) / noteHeight);
+        const clickedPitch = maxPitch - pitchIdx;
+        soundfontService.playNote(clickedPitch, 0.4, 90);
+      }
+      return;
+    }
+
+    if (hoveredNote && onEditNote) {
+      onEditNote(hoveredNote);
+      return;
+    }
+
+    const seekTime = ((x - keyboardWidth) / rollWidth) * duration;
+    setPlayheadTime(seekTime);
+  };
+
+  const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !onAddNote) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const keyboardWidth = 55;
+    const chordHeaderHeight = 24;
+    const rollHeight = canvas.height - chordHeaderHeight;
+    const rollWidth = canvas.width - keyboardWidth;
+    const noteHeight = rollHeight / pitchCount;
+
+    if (x > keyboardWidth && y > chordHeaderHeight) {
+      const clickTime = ((x - keyboardWidth) / rollWidth) * duration;
+      const pitchIdx = Math.floor((y - chordHeaderHeight) / noteHeight);
+      const pitchVal = maxPitch - pitchIdx;
+
+      const newNote: NoteEvent = {
+        pitch: pitchVal,
+        name: midiToName(pitchVal),
+        start: parseFloat(clickTime.toFixed(3)),
+        duration: 0.5,
+        end: parseFloat((clickTime + 0.5).toFixed(3)),
+        velocity: 85
+      };
+      onAddNote(newNote);
+      soundfontService.playNote(pitchVal, 0.4, 85);
     }
   };
 
   return (
     <div className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Interactive Neural Piano Roll
+              Interactive Neural Piano Roll & Chord Track
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Showing {notes.length} polyphonic note events • Click keys on the left to audition
+              Click any note to edit/delete • Double-click empty canvas to insert notes • Click keys on the left to audition
             </p>
           </div>
 
@@ -295,7 +373,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
           </div>
         </div>
 
-        {hoveredNote && (
+        {hoveredNote ? (
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -311,6 +389,11 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
             <span style={{ color: 'var(--text-secondary)' }}>Start: {hoveredNote.start.toFixed(2)}s</span>
             <span style={{ color: 'var(--text-secondary)' }}>Dur: {hoveredNote.duration.toFixed(2)}s</span>
             <span style={{ color: '#06b6d4' }}>Vel: {hoveredNote.velocity}</span>
+            <span style={{ color: '#f43f5e', fontSize: '0.72rem' }}>Click to Edit</span>
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Double-click canvas to add note
           </div>
         )}
       </div>
@@ -319,10 +402,11 @@ export const PianoRoll: React.FC<PianoRollProps> = ({ result }) => {
         <canvas
           ref={canvasRef}
           width={1100}
-          height={420}
+          height={430}
           onMouseMove={handleCanvasMouseMove}
           onMouseLeave={() => setHoveredNote(null)}
           onClick={handleCanvasClick}
+          onDoubleClick={handleCanvasDoubleClick}
           style={{
             display: 'block',
             borderRadius: 12,

@@ -5,7 +5,7 @@ export interface NoteEvent {
   end: number;
   duration: number;
   velocity: number;
-  amplitude: number;
+  amplitude?: number;
   track?: string;
   instrument?: string;
 }
@@ -15,6 +15,17 @@ export interface KeySignatureInfo {
   mode: string;
   confidence: number;
   display: string;
+}
+
+export interface ChordInfo {
+  figure: string;
+  root: string;
+  quality: string;
+  bass: string;
+  confidence: number;
+  measure: number;
+  start_time: number;
+  end_time: number;
 }
 
 export interface TranscriptionExports {
@@ -38,7 +49,7 @@ export interface TranscriptionResult {
   task_id: string;
   is_multitrack?: boolean;
   device?: string;
-  filename: string;
+  filename?: string;
   duration: number;
   tempo: number;
   detected_tempo?: number;
@@ -48,8 +59,9 @@ export interface TranscriptionResult {
   quantization_grid: string;
   notes_count: number;
   notes: NoteEvent[];
-  waveform: number[];
-  beat_times: number[];
+  chords?: ChordInfo[];
+  waveform?: number[];
+  beat_times?: number[];
   tracks?: Record<string, StemTrackInfo>;
   musicxml: string;
   exports: TranscriptionExports;

@@ -8,11 +8,13 @@ import {
   ArrowLeft,
   CheckCircle2,
   Sliders,
-  Cpu
+  Cpu,
+  RefreshCw,
+  Sparkles
 } from 'lucide-react';
 
-import type { TranscriptionResult, SampleTrack, TranscriptionOptions } from './types';
-import { checkBackendHealth, fetchSamples, transcribeAudioFile, transcribeSampleTrack } from './services/api';
+import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
+import { checkBackendHealth, fetchSamples, transcribeAudioFile, transcribeSampleTrack, reQuantizeScore } from './services/api';
 import { Navbar } from './components/Navbar';
 import { AudioUploader } from './components/AudioUploader';
 import { ScoreViewer } from './components/ScoreViewer';
@@ -22,6 +24,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { NotesTable } from './components/NotesTable';
 import { ExportModal } from './components/ExportModal';
 import { StemMixer } from './components/StemMixer';
+import { NoteEditorModal } from './components/NoteEditorModal';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -34,6 +37,8 @@ export const App: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
+  const [hasPendingEdits, setHasPendingEdits] = useState(false);
 
   const [options, setOptions] = useState<TranscriptionOptions>({
     mode: 'single',
@@ -91,6 +96,7 @@ export const App: React.FC = () => {
     );
     setLastUploadedFile(file);
     setLastSampleId(null);
+    setHasPendingEdits(false);
 
     try {
       const res = await transcribeAudioFile(file, options, file.name.replace(/\.[^/.]+$/, ''));
@@ -115,9 +121,9 @@ export const App: React.FC = () => {
     );
     setLastSampleId(sampleId);
     setLastUploadedFile(null);
+    setHasPendingEdits(false);
 
     try {
-      // If sample is orchestral ensemble, automatically enable multitrack
       const effectiveOptions = sampleId === 'orchestra_ensemble' ? { ...options, mode: 'multitrack' as const } : options;
       const res = await transcribeSampleTrack(sampleId, effectiveOptions);
       setResult(res);
@@ -139,6 +145,64 @@ export const App: React.FC = () => {
     }
   };
 
+  // Note Editing Handlers
+  const handleSaveNote = (updatedNote: NoteEvent) => {
+    if (!result) return;
+    const updatedNotes = result.notes.map(n =>
+      (n.pitch === editingNote?.pitch && Math.abs(n.start - (editingNote?.start || 0)) < 0.001) ? updatedNote : n
+    );
+    setResult({ ...result, notes: updatedNotes });
+    setEditingNote(null);
+    setHasPendingEdits(true);
+  };
+
+  const handleDeleteNote = (deletedNote: NoteEvent) => {
+    if (!result) return;
+    const updatedNotes = result.notes.filter(n =>
+      !(n.pitch === deletedNote.pitch && Math.abs(n.start - deletedNote.start) < 0.001)
+    );
+    setResult({ ...result, notes: updatedNotes, notes_count: updatedNotes.length });
+    setEditingNote(null);
+    setHasPendingEdits(true);
+  };
+
+  const handleAddNote = (newNote: NoteEvent) => {
+    if (!result) return;
+    const updatedNotes = [...result.notes, newNote].sort((a, b) => a.start - b.start);
+    setResult({ ...result, notes: updatedNotes, notes_count: updatedNotes.length });
+    setHasPendingEdits(true);
+  };
+
+  const handleApplyEdits = async () => {
+    if (!result) return;
+    setIsLoading(true);
+    setLoadingMessage('Re-quantizing edited notes, re-analyzing chords, and engraving updated score...');
+
+    try {
+      const res = await reQuantizeScore({
+        task_id: result.task_id,
+        notes: result.notes,
+        bpm: result.tempo,
+        time_signature: result.time_signature,
+        key_tonic: result.key.tonic,
+        key_mode: result.key.mode,
+        clef_mode: result.clef_mode || 'grand_staff',
+        quantization_grid: result.quantization_grid,
+        title: result.filename,
+        is_multitrack: result.is_multitrack,
+        tracks: result.tracks
+      });
+      setResult(res);
+      setHasPendingEdits(false);
+      triggerConfetti();
+    } catch (err: any) {
+      alert(`Failed to apply note edits: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -147,6 +211,8 @@ export const App: React.FC = () => {
     setResult(null);
     setLastUploadedFile(null);
     setLastSampleId(null);
+    setHasPendingEdits(false);
+    setEditingNote(null);
   };
 
   return (
@@ -222,7 +288,7 @@ export const App: React.FC = () => {
                 </div>
 
                 <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-                  {result.filename}
+                  {result.filename || 'Transcribed Musical Score'}
                 </h2>
               </div>
 
@@ -242,6 +308,77 @@ export const App: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Inferred Harmonic Chord Progression Ribbon */}
+            {result.chords && result.chords.length > 0 && (
+              <div className="glass-panel" style={{
+                padding: '10px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                borderRadius: 12,
+                border: '1px solid var(--border-active)',
+                background: 'rgba(15, 23, 42, 0.75)',
+                overflowX: 'auto'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c4b5fd', fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  <Sparkles size={14} />
+                  <span>Lead Sheet Chords:</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                  {result.chords.map((c, cIdx) => (
+                    <div
+                      key={cIdx}
+                      style={{
+                        padding: '3px 10px',
+                        background: 'rgba(139, 92, 246, 0.18)',
+                        border: '1px solid rgba(139, 92, 246, 0.35)',
+                        borderRadius: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>M{c.measure}</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#38bdf8' }}>{c.figure}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Unsaved Note Edits Alert Banner */}
+            {hasPendingEdits && (
+              <div className="glass-panel" style={{
+                padding: '12px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderRadius: 12,
+                border: '1px solid #f59e0b',
+                background: 'rgba(245, 158, 11, 0.12)',
+                flexWrap: 'wrap',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#fde68a' }}>
+                    You have modified note events in the visual editor.
+                  </span>
+                </div>
+
+                <button
+                  className="btn btn-primary"
+                  onClick={handleApplyEdits}
+                  disabled={isLoading}
+                  style={{ padding: '6px 16px', fontSize: '0.82rem' }}
+                >
+                  <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+                  <span>Apply Edits & Re-Engrave Score</span>
+                </button>
+              </div>
+            )}
 
             {/* View Switcher Tabs */}
             <div style={{
@@ -281,7 +418,7 @@ export const App: React.FC = () => {
                 onClick={() => setActiveTab('pianoroll')}
               >
                 <Layers size={16} />
-                <span>Multi-Track Piano Roll</span>
+                <span>Interactive Piano Roll & Chords</span>
               </button>
 
               <button
@@ -313,7 +450,11 @@ export const App: React.FC = () => {
             )}
 
             {activeTab === 'pianoroll' && (
-              <PianoRoll result={result} />
+              <PianoRoll
+                result={result}
+                onEditNote={setEditingNote}
+                onAddNote={handleAddNote}
+              />
             )}
 
             {activeTab === 'waveform' && (
@@ -321,7 +462,11 @@ export const App: React.FC = () => {
             )}
 
             {activeTab === 'notes' && (
-              <NotesTable result={result} />
+              <NotesTable
+                result={result}
+                onEditNote={setEditingNote}
+                onDeleteNote={handleDeleteNote}
+              />
             )}
 
             {/* Embedded AI Settings Drawer */}
@@ -334,6 +479,14 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Note Editor Modal */}
+      <NoteEditorModal
+        note={editingNote}
+        onSave={handleSaveNote}
+        onDelete={handleDeleteNote}
+        onClose={() => setEditingNote(null)}
+      />
 
       {/* Export Formats Modal */}
       {result && (
