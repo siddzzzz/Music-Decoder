@@ -13,12 +13,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from pydantic import BaseModel
+
 from engine.audio_processor import AudioProcessor
 from engine.transcriber import Transcriber
 from engine.quantizer import ScoreQuantizer
 from engine.exporter import ScoreExporter
 from engine.sample_generator import SampleGenerator
 from engine.multitrack_engine import MultiTrackEngine
+from engine.chord_detector import ChordDetector
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -237,7 +240,8 @@ def _process_transcription(
         clef_mode=clef_mode
     )
 
-    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+    # 5. Detect Chords
+    chord_progression = ChordDetector.analyze_chords_by_measure(note_events, effective_bpm, time_signature)
 
     return {
         "task_id": task_id,
@@ -256,6 +260,7 @@ def _process_transcription(
         "quantization_grid": quantization_grid,
         "notes_count": len(note_events),
         "notes": note_events,
+        "chords": chord_progression,
         "waveform": audio_features["waveform"],
         "beat_times": audio_features["beat_times"],
         "musicxml": musicxml_content,
@@ -432,6 +437,9 @@ def _process_multitrack_transcription(
 
     musicxml_content = ScoreQuantizer.to_musicxml_string(score)
 
+    # Detect Master Chords
+    mt_chords = ChordDetector.analyze_chords_by_measure(mt_result["all_notes"], effective_bpm, time_signature)
+
     # Prepare stem audio paths and endpoints
     stem_exports = {}
     for t_name in tracks.keys():
@@ -449,6 +457,7 @@ def _process_multitrack_transcription(
         "quantization_grid": quantization_grid,
         "notes_count": mt_result["total_notes"],
         "notes": mt_result["all_notes"],
+        "chords": mt_chords,
         "waveform": mt_result["waveform"],
         "beat_times": mt_result["beat_times"],
         "tracks": tracks,
@@ -459,6 +468,132 @@ def _process_multitrack_transcription(
             "pdf": f"/api/export/{task_id}/pdf",
             "audio": f"/api/export/{task_id}/audio",
             "stems": stem_exports
+        }
+    }
+
+
+class ReQuantizeRequest(BaseModel):
+    task_id: str
+    notes: List[Dict[str, Any]]
+    bpm: float = 120.0
+    time_signature: str = "4/4"
+    key_tonic: str = "C"
+    key_mode: str = "major"
+    clef_mode: str = "grand_staff"
+    quantization_grid: str = "1/16"
+    title: Optional[str] = "Transcribed Score (Edited)"
+    composer: Optional[str] = "Music-Decoder Editor"
+    is_multitrack: bool = False
+    tracks: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/re-quantize")
+async def re_quantize_score(req: ReQuantizeRequest):
+    """
+    Re-quantizes an edited note sequence and updates MusicXML, MIDI, and PDF files.
+    """
+    task_dir = TEMP_DIR / req.task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    # Sort notes
+    sorted_notes = sorted(req.notes, key=lambda x: float(x.get("start", 0)))
+    for n in sorted_notes:
+        if "duration" not in n and "end" in n:
+            n["duration"] = round(float(n["end"]) - float(n["start"]), 3)
+        elif "end" not in n and "duration" in n:
+            n["end"] = round(float(n["start"]) + float(n["duration"]), 3)
+
+    if req.is_multitrack and req.tracks:
+        # Multi-Track Re-quantization
+        score = ScoreQuantizer.build_multitrack_score(
+            tracks=req.tracks,
+            bpm=req.bpm,
+            time_signature_str=req.time_signature,
+            key_tonic=req.key_tonic,
+            key_mode=req.key_mode,
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Orchestral Score",
+            composer=req.composer or "Music-Decoder Editor"
+        )
+        # Save exports
+        ScoreExporter.save_musicxml(score, str(task_dir / "score.musicxml"))
+        ScoreExporter.save_multitrack_midi(req.tracks, req.bpm, str(task_dir / "transcription.mid"))
+        ScoreExporter.generate_multitrack_pdf_report(
+            output_path=str(task_dir / "sheet_music.pdf"),
+            title=req.title or "Orchestral Score",
+            composer=req.composer or "Music-Decoder Editor",
+            bpm=req.bpm,
+            key_signature=f"{req.key_tonic} {req.key_mode.capitalize()}",
+            time_signature=req.time_signature,
+            tracks=req.tracks
+        )
+        chord_progression = ChordDetector.analyze_chords_by_measure(sorted_notes, req.bpm, req.time_signature)
+    else:
+        # Solo / Grand Staff Re-quantization
+        score = ScoreQuantizer.build_score(
+            note_events=sorted_notes,
+            bpm=req.bpm,
+            time_signature_str=req.time_signature,
+            key_tonic=req.key_tonic,
+            key_mode=req.key_mode,
+            clef_mode=req.clef_mode,
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Transcribed Score",
+            composer=req.composer or "Music-Decoder Editor"
+        )
+
+        # PrettyMIDI generation
+        pm = pretty_midi.PrettyMIDI(initial_tempo=req.bpm)
+        inst = pretty_midi.Instrument(program=0)
+        for n in sorted_notes:
+            pm_note = pretty_midi.Note(
+                velocity=int(n.get("velocity", 80)),
+                pitch=int(n["pitch"]),
+                start=float(n["start"]),
+                end=float(n["end"])
+            )
+            inst.notes.append(pm_note)
+        pm.instruments.append(inst)
+
+        ScoreExporter.save_musicxml(score, str(task_dir / "score.musicxml"))
+        ScoreExporter.save_midi(pm, str(task_dir / "transcription.mid"))
+        ScoreExporter.generate_pdf_report(
+            output_path=str(task_dir / "sheet_music.pdf"),
+            title=req.title or "Transcribed Score",
+            composer=req.composer or "Music-Decoder Editor",
+            bpm=req.bpm,
+            key_signature=f"{req.key_tonic} {req.key_mode.capitalize()}",
+            time_signature=req.time_signature,
+            note_events=sorted_notes,
+            clef_mode=req.clef_mode
+        )
+        chord_progression = ChordDetector.analyze_chords_by_measure(sorted_notes, req.bpm, req.time_signature)
+
+    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+
+    return {
+        "task_id": req.task_id,
+        "is_multitrack": req.is_multitrack,
+        "tempo": round(req.bpm, 1),
+        "key": {
+            "tonic": req.key_tonic,
+            "mode": req.key_mode,
+            "display": f"{req.key_tonic} {req.key_mode.capitalize()}",
+            "confidence": 1.0
+        },
+        "time_signature": req.time_signature,
+        "clef_mode": req.clef_mode,
+        "quantization_grid": req.quantization_grid,
+        "notes_count": len(sorted_notes),
+        "notes": sorted_notes,
+        "chords": chord_progression,
+        "tracks": req.tracks,
+        "musicxml": musicxml_content,
+        "exports": {
+            "midi": f"/api/export/{req.task_id}/midi",
+            "musicxml": f"/api/export/{req.task_id}/musicxml",
+            "pdf": f"/api/export/{req.task_id}/pdf",
+            "audio": f"/api/export/{req.task_id}/audio"
         }
     }
 
@@ -478,4 +613,5 @@ def download_stem(task_id: str, stem_name: str):
             raise HTTPException(status_code=404, detail="Stem file not found")
 
     return FileResponse(str(stem_file), media_type="audio/wav", filename=f"{stem_name}_stem.wav")
+
 

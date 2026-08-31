@@ -11,6 +11,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Rect, String, Line, Circle, Group
+from engine.chord_detector import ChordDetector
 
 
 class ScoreExporter:
@@ -126,7 +127,26 @@ class ScoreExporter:
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
         ]))
         story.append(meta_table)
-        story.append(Spacer(1, 14))
+        story.append(Spacer(1, 10))
+
+        # Harmonic Chord Progression
+        progression = ChordDetector.analyze_chords_by_measure(note_events, bpm, time_signature)
+        if progression:
+            chord_str = "   •   ".join(f"M{c['measure']}: <b>{c['figure']}</b>" for c in progression[:10])
+            if len(progression) > 10:
+                chord_str += "   •   ..."
+            story.append(Paragraph("Detected Chord Progression (Lead Sheet Harmony)", section_heading))
+            chord_box = Table([[Paragraph(chord_str, meta_style)]], colWidths=[540])
+            chord_box.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#ede9fe")),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#c4b5fd")),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ]))
+            story.append(chord_box)
+            story.append(Spacer(1, 12))
 
         # Visual Staff Score Notation Preview (Vector Drawing)
         story.append(Paragraph("Musical Notation Preview", section_heading))
@@ -360,7 +380,31 @@ class ScoreExporter:
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
         ]))
         story.append(meta_table)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
+
+        # Harmonic Chord Progression across Staves
+        all_orch_notes = []
+        for t_info in tracks.values():
+            all_orch_notes.extend(t_info.get("notes", []))
+        all_orch_notes.sort(key=lambda x: x.get("start", 0))
+
+        mt_progression = ChordDetector.analyze_chords_by_measure(all_orch_notes, bpm, time_signature)
+        if mt_progression:
+            chord_str = "   •   ".join(f"M{c['measure']}: <b>{c['figure']}</b>" for c in mt_progression[:10])
+            if len(mt_progression) > 10:
+                chord_str += "   •   ..."
+            story.append(Paragraph("Detected Master Harmonic Chord Progression", section_heading))
+            chord_box = Table([[Paragraph(chord_str, meta_style)]], colWidths=[540])
+            chord_box.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#ede9fe")),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#c4b5fd")),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ]))
+            story.append(chord_box)
+            story.append(Spacer(1, 12))
 
         # Track Summary Table
         story.append(Paragraph("Orchestral Instrument Staves Summary", section_heading))

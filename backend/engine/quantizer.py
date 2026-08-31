@@ -6,7 +6,8 @@ import tempfile
 from fractions import Fraction
 from typing import List, Dict, Any, Optional, Tuple
 import music21
-from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument
+from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument, harmony
+from engine.chord_detector import ChordDetector
 
 
 class ScoreQuantizer:
@@ -112,6 +113,10 @@ class ScoreQuantizer:
         grid_step = cls.GRID_FRACTIONS.get(quantization_grid, Fraction(1, 4))
         tempo_mark = tempo.MetronomeMark(number=round(bpm))
 
+        # Detect harmonic chord progression per measure
+        chord_progression = ChordDetector.analyze_chords_by_measure(note_events, bpm, time_signature_str)
+        chords_map = {c["measure"]: c["figure"] for c in chord_progression}
+
         # Quantize all note events into exact fractions
         quantized_notes = []
         for ev in note_events:
@@ -144,7 +149,8 @@ class ScoreQuantizer:
                 tempo_mark=tempo_mark,
                 measure_len_frac=measure_len_frac,
                 part_name="Right Hand",
-                grid_step=grid_step
+                grid_step=grid_step,
+                chords_by_measure=chords_map
             )
             bass_part = cls._assemble_part(
                 bass_notes,
@@ -154,7 +160,8 @@ class ScoreQuantizer:
                 tempo_mark=None,
                 measure_len_frac=measure_len_frac,
                 part_name="Left Hand",
-                grid_step=grid_step
+                grid_step=grid_step,
+                chords_by_measure=None
             )
 
             # Equalize measure counts
@@ -183,7 +190,8 @@ class ScoreQuantizer:
                 tempo_mark=tempo_mark,
                 measure_len_frac=measure_len_frac,
                 part_name="Instrument",
-                grid_step=grid_step
+                grid_step=grid_step,
+                chords_by_measure=chords_map
             )
             score.append(solo_part)
 
@@ -199,7 +207,8 @@ class ScoreQuantizer:
         tempo_mark: Optional[tempo.MetronomeMark],
         measure_len_frac: Fraction,
         part_name: str,
-        grid_step: Fraction
+        grid_step: Fraction,
+        chords_by_measure: Optional[Dict[int, str]] = None
     ) -> stream.Part:
         """
         Assembles a stream.Part measure-by-measure with standard expressible durations.
@@ -214,6 +223,12 @@ class ScoreQuantizer:
             m.append(ts)
             if tempo_mark:
                 m.append(tempo_mark)
+            if chords_by_measure and 1 in chords_by_measure:
+                try:
+                    cs = harmony.ChordSymbol(chords_by_measure[1])
+                    m.append(cs)
+                except Exception:
+                    pass
             r = note.Rest()
             r.duration = duration.Duration(measure_len_frac)
             m.append(r)
@@ -261,6 +276,14 @@ class ScoreQuantizer:
                 m.append(ts)
                 if tempo_mark:
                     m.append(tempo_mark)
+
+            # Insert harmonic chord symbol if detected for this measure
+            if chords_by_measure and (m_idx + 1) in chords_by_measure:
+                try:
+                    cs = harmony.ChordSymbol(chords_by_measure[m_idx + 1])
+                    m.append(cs)
+                except Exception:
+                    pass
 
             m_notes = measures_dict.get(m_idx, [])
             m_notes.sort(key=lambda x: x["m_offset"])
@@ -374,6 +397,15 @@ class ScoreQuantizer:
         grid_step = cls.GRID_FRACTIONS.get(quantization_grid, Fraction(1, 4))
         tempo_mark = tempo.MetronomeMark(number=round(bpm))
 
+        # Collect all harmonic notes to analyze chords
+        all_orch_notes = []
+        for t_info in tracks.values():
+            all_orch_notes.extend(t_info.get("notes", []))
+        all_orch_notes.sort(key=lambda x: x.get("start", 0))
+
+        chord_progression = ChordDetector.analyze_chords_by_measure(all_orch_notes, bpm, time_signature_str)
+        chords_map = {c["measure"]: c["figure"] for c in chord_progression}
+
         assembled_parts = []
 
         # Part 1: Lead Melody (Flute / Violin / Vocal)
@@ -388,7 +420,8 @@ class ScoreQuantizer:
                 tempo_mark=tempo_mark,
                 measure_len_frac=measure_len_frac,
                 part_name="Lead / Winds / Solo",
-                grid_step=grid_step
+                grid_step=grid_step,
+                chords_by_measure=chords_map
             )
             lead_part.insert(0, instrument.Flute())
             assembled_parts.append(lead_part)
@@ -405,7 +438,8 @@ class ScoreQuantizer:
                 tempo_mark=tempo_mark if len(assembled_parts) == 0 else None,
                 measure_len_frac=measure_len_frac,
                 part_name="Harmony / Keys / Strings",
-                grid_step=grid_step
+                grid_step=grid_step,
+                chords_by_measure=chords_map if len(assembled_parts) == 0 else None
             )
             harm_part.insert(0, instrument.Piano())
             assembled_parts.append(harm_part)
