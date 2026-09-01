@@ -10,7 +10,8 @@ import {
   Sliders,
   Cpu,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Music2
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
@@ -25,6 +26,7 @@ import { NotesTable } from './components/NotesTable';
 import { ExportModal } from './components/ExportModal';
 import { StemMixer } from './components/StemMixer';
 import { NoteEditorModal } from './components/NoteEditorModal';
+import { GuitarFretboard } from './components/GuitarFretboard';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -35,7 +37,7 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
@@ -127,7 +129,11 @@ export const App: React.FC = () => {
       const effectiveOptions = sampleId === 'orchestra_ensemble' ? { ...options, mode: 'multitrack' as const } : options;
       const res = await transcribeSampleTrack(sampleId, effectiveOptions);
       setResult(res);
-      if (res.is_multitrack) setActiveTab('score');
+      if (sampleId === 'acoustic_guitar') {
+        setActiveTab('guitar_tab');
+      } else if (res.is_multitrack) {
+        setActiveTab('score');
+      }
       triggerConfetti();
     } catch (err: any) {
       alert(`Error transcribing sample: ${err.message || 'Unknown error'}`);
@@ -176,7 +182,7 @@ export const App: React.FC = () => {
   const handleApplyEdits = async () => {
     if (!result) return;
     setIsLoading(true);
-    setLoadingMessage('Re-quantizing edited notes, re-analyzing chords, and engraving updated score...');
+    setLoadingMessage('Re-quantizing edited notes, recalculating guitar TAB, and engraving updated score...');
 
     try {
       const res = await reQuantizeScore({
@@ -413,6 +419,15 @@ export const App: React.FC = () => {
               )}
 
               <button
+                className={`btn ${activeTab === 'guitar_tab' ? 'btn-amber' : 'btn-secondary'}`}
+                style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+                onClick={() => setActiveTab('guitar_tab')}
+              >
+                <Music2 size={16} color={activeTab === 'guitar_tab' ? '#ffffff' : '#f59e0b'} />
+                <span>Guitar TAB & Fretboard</span>
+              </button>
+
+              <button
                 className={`btn ${activeTab === 'pianoroll' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ padding: '8px 16px', fontSize: '0.86rem' }}
                 onClick={() => setActiveTab('pianoroll')}
@@ -447,6 +462,10 @@ export const App: React.FC = () => {
 
             {activeTab === 'mixer' && result.is_multitrack && (
               <StemMixer result={result} />
+            )}
+
+            {activeTab === 'guitar_tab' && (
+              <GuitarFretboard result={result} />
             )}
 
             {activeTab === 'pianoroll' && (

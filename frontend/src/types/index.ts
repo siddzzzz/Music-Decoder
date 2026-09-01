@@ -8,6 +8,8 @@ export interface NoteEvent {
   amplitude?: number;
   track?: string;
   instrument?: string;
+  string?: number;
+  fret?: number;
 }
 
 export interface KeySignatureInfo {
@@ -59,6 +61,8 @@ export interface TranscriptionResult {
   quantization_grid: string;
   notes_count: number;
   notes: NoteEvent[];
+  tab_notes?: NoteEvent[];
+  ascii_tab?: string;
   chords?: ChordInfo[];
   waveform?: number[];
   beat_times?: number[];
