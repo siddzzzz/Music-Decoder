@@ -12,6 +12,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Rect, String, Line, Circle, Group
 from engine.chord_detector import ChordDetector
+from engine.tab_engine import GuitarTabEngine
 
 
 class ScoreExporter:
@@ -189,7 +190,8 @@ class ScoreExporter:
             # Note stem
             d.add(Line(nx + 3.5, ny, nx + 3.5, ny + 20, strokeColor=colors.HexColor("#0f172a"), strokeWidth=1.2))
             # Note name label
-            d.add(String(nx - 4, staff_top_y - 42, n["name"], fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#64748b")))
+            note_name = n.get("name") or pretty_midi.note_number_to_name(n["pitch"])
+            d.add(String(nx - 4, staff_top_y - 42, note_name, fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#64748b")))
 
         # Bass staff (if grand staff)
         if clef_mode == "grand_staff":
@@ -204,33 +206,69 @@ class ScoreExporter:
                 d.add(Line(bar_x, bass_top_y, bar_x, bass_top_y - 32, strokeColor=colors.HexColor("#64748b"), strokeWidth=1.5))
             d.add(Line(516, bass_top_y, 516, bass_top_y - 32, strokeColor=colors.HexColor("#64748b"), strokeWidth=3))
 
+        # 6-Line Guitar Tablature Section (If Guitar TAB or Dual TAB)
+        if clef_mode in ["guitar_tab", "dual_tab"]:
+            tab_notes = GuitarTabEngine.optimize_tablature(note_events)
+            ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, bpm, time_signature)
+            story.append(Paragraph("6-String Guitar Tablature (Standard Tuning E-A-D-G-B-E)", section_heading))
+            
+            tab_style = ParagraphStyle(
+                'TabMonospace',
+                parent=styles['Normal'],
+                fontName='Courier',
+                fontSize=8,
+                leading=10,
+                textColor=colors.HexColor("#0f172a")
+            )
+            tab_p = Paragraph(f"<pre>{ascii_tab.replace(chr(10), '<br/>')}</pre>", tab_style)
+            tab_box = Table([[tab_p]], colWidths=[540])
+            tab_box.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ]))
+            story.append(tab_box)
+            story.append(Spacer(1, 12))
+
         story.append(d)
         story.append(Spacer(1, 14))
 
         # Transcribed Note Events Table
         story.append(Paragraph("Transcribed Notes Summary", section_heading))
         table_rows = [
-            ["#", "Note Name", "MIDI Pitch", "Start (s)", "Duration (s)", "Velocity"]
+            ["#", "Note Name", "MIDI Pitch", "Start (s)", "Duration (s)", "String / Fret", "Velocity"]
         ]
+        
+        tab_lookup = {}
+        for tn in GuitarTabEngine.optimize_tablature(note_events):
+            tab_lookup[(int(tn["pitch"]), round(float(tn.get("start", 0)), 2))] = (tn.get("string"), tn.get("fret"))
+
         for i, n in enumerate(note_events[:30]):  # Show up to first 30 notes in summary table
+            note_name = n.get("name") or pretty_midi.note_number_to_name(n["pitch"])
+            sf = tab_lookup.get((int(n["pitch"]), round(float(n.get("start", 0)), 2)))
+            sf_str = f"Str {sf[0]}, Fr {sf[1]}" if sf and sf[0] is not None else "-"
             table_rows.append([
                 str(i + 1),
-                n["name"],
+                note_name,
                 str(n["pitch"]),
                 f"{n['start']:.2f}",
                 f"{n['duration']:.2f}",
+                sf_str,
                 str(n["velocity"])
             ])
 
         if len(note_events) > 30:
-            table_rows.append(["...", f"Total {len(note_events)} notes transcribed", "...", "...", "...", "..."])
+            table_rows.append(["...", f"Total {len(note_events)} notes transcribed", "...", "...", "...", "...", "..."])
 
-        note_table = Table(table_rows, colWidths=[35, 100, 100, 100, 100, 105])
+        note_table = Table(table_rows, colWidths=[30, 85, 85, 85, 85, 85, 85])
         note_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#0f172a")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 0), (-1, 0), 8.5),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),

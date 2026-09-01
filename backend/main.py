@@ -22,6 +22,7 @@ from engine.exporter import ScoreExporter
 from engine.sample_generator import SampleGenerator
 from engine.multitrack_engine import MultiTrackEngine
 from engine.chord_detector import ChordDetector
+from engine.tab_engine import GuitarTabEngine
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -240,8 +241,10 @@ def _process_transcription(
         clef_mode=clef_mode
     )
 
-    # 5. Detect Chords
+    # 5. Detect Chords & Optimize Guitar Tablature
     chord_progression = ChordDetector.analyze_chords_by_measure(note_events, effective_bpm, time_signature)
+    tab_notes = GuitarTabEngine.optimize_tablature(note_events, is_bass=(clef_mode == "bass"))
+    ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, effective_bpm, time_signature)
 
     return {
         "task_id": task_id,
@@ -260,6 +263,8 @@ def _process_transcription(
         "quantization_grid": quantization_grid,
         "notes_count": len(note_events),
         "notes": note_events,
+        "tab_notes": tab_notes,
+        "ascii_tab": ascii_tab,
         "chords": chord_progression,
         "waveform": audio_features["waveform"],
         "beat_times": audio_features["beat_times"],
@@ -437,8 +442,10 @@ def _process_multitrack_transcription(
 
     musicxml_content = ScoreQuantizer.to_musicxml_string(score)
 
-    # Detect Master Chords
+    # Detect Master Chords & Guitar Tablature
     mt_chords = ChordDetector.analyze_chords_by_measure(mt_result["all_notes"], effective_bpm, time_signature)
+    mt_tab_notes = GuitarTabEngine.optimize_tablature(mt_result["all_notes"])
+    mt_ascii_tab = GuitarTabEngine.generate_ascii_tab(mt_tab_notes, effective_bpm, time_signature)
 
     # Prepare stem audio paths and endpoints
     stem_exports = {}
@@ -457,6 +464,8 @@ def _process_multitrack_transcription(
         "quantization_grid": quantization_grid,
         "notes_count": mt_result["total_notes"],
         "notes": mt_result["all_notes"],
+        "tab_notes": mt_tab_notes,
+        "ascii_tab": mt_ascii_tab,
         "chords": mt_chords,
         "waveform": mt_result["waveform"],
         "beat_times": mt_result["beat_times"],
@@ -528,8 +537,10 @@ async def re_quantize_score(req: ReQuantizeRequest):
             tracks=req.tracks
         )
         chord_progression = ChordDetector.analyze_chords_by_measure(sorted_notes, req.bpm, req.time_signature)
+        tab_notes = GuitarTabEngine.optimize_tablature(sorted_notes)
+        ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, req.bpm, req.time_signature)
     else:
-        # Solo / Grand Staff Re-quantization
+        # Solo / Grand Staff / Guitar TAB Re-quantization
         score = ScoreQuantizer.build_score(
             note_events=sorted_notes,
             bpm=req.bpm,
@@ -568,6 +579,8 @@ async def re_quantize_score(req: ReQuantizeRequest):
             clef_mode=req.clef_mode
         )
         chord_progression = ChordDetector.analyze_chords_by_measure(sorted_notes, req.bpm, req.time_signature)
+        tab_notes = GuitarTabEngine.optimize_tablature(sorted_notes, is_bass=(req.clef_mode == "bass"))
+        ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, req.bpm, req.time_signature)
 
     musicxml_content = ScoreQuantizer.to_musicxml_string(score)
 
@@ -586,6 +599,8 @@ async def re_quantize_score(req: ReQuantizeRequest):
         "quantization_grid": req.quantization_grid,
         "notes_count": len(sorted_notes),
         "notes": sorted_notes,
+        "tab_notes": tab_notes,
+        "ascii_tab": ascii_tab,
         "chords": chord_progression,
         "tracks": req.tracks,
         "musicxml": musicxml_content,

@@ -6,8 +6,9 @@ import tempfile
 from fractions import Fraction
 from typing import List, Dict, Any, Optional, Tuple
 import music21
-from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument, harmony
+from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument, harmony, articulations
 from engine.chord_detector import ChordDetector
+from engine.tab_engine import GuitarTabEngine
 
 
 class ScoreQuantizer:
@@ -117,9 +118,12 @@ class ScoreQuantizer:
         chord_progression = ChordDetector.analyze_chords_by_measure(note_events, bpm, time_signature_str)
         chords_map = {c["measure"]: c["figure"] for c in chord_progression}
 
+        # Optimize tablature string & fret assignments
+        tab_annotated = GuitarTabEngine.optimize_tablature(note_events, is_bass=(clef_mode == "bass"))
+
         # Quantize all note events into exact fractions
         quantized_notes = []
-        for ev in note_events:
+        for idx, ev in enumerate(note_events):
             raw_start = cls.seconds_to_quarter_fraction(ev["start"], bpm)
             raw_dur = cls.seconds_to_quarter_fraction(ev["duration"], bpm)
 
@@ -128,16 +132,66 @@ class ScoreQuantizer:
             if q_dur < grid_step:
                 q_dur = grid_step
 
+            tab_info = tab_annotated[idx] if idx < len(tab_annotated) else {}
+
             quantized_notes.append({
                 "pitch": int(ev["pitch"]),
                 "start_frac": q_start,
                 "dur_frac": q_dur,
                 "end_frac": q_start + q_dur,
-                "velocity": int(ev.get("velocity", 80))
+                "velocity": int(ev.get("velocity", 80)),
+                "string": tab_info.get("string"),
+                "fret": tab_info.get("fret")
             })
 
         # Separate into staves
-        if clef_mode == "grand_staff":
+        if clef_mode == "dual_tab":
+            # Dual: Standard Treble Staff + 6-Line Tablature Staff
+            notation_part = cls._assemble_part(
+                quantized_notes,
+                clef_obj=clef.TrebleClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Guitar (Notation)",
+                grid_step=grid_step,
+                chords_by_measure=chords_map
+            )
+            tab_part = cls._assemble_part(
+                quantized_notes,
+                clef_obj=clef.TabClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=None,
+                measure_len_frac=measure_len_frac,
+                part_name="Guitar (TAB)",
+                grid_step=grid_step,
+                chords_by_measure=None
+            )
+            num_m = max(len(notation_part.getElementsByClass('Measure')), len(tab_part.getElementsByClass('Measure')), 1)
+            cls._pad_part_measures(notation_part, num_m, measure_len_frac)
+            cls._pad_part_measures(tab_part, num_m, measure_len_frac)
+
+            staff_group = layout.StaffGroup([notation_part, tab_part], name="Guitar", abbreviation="Gtr.", symbol="bracket")
+            staff_group.barTogether = 'mensurstrich'
+            score.append(staff_group)
+            score.append(notation_part)
+            score.append(tab_part)
+        elif clef_mode == "guitar_tab":
+            tab_part = cls._assemble_part(
+                quantized_notes,
+                clef_obj=clef.TabClef(),
+                ts=ts,
+                score_key=score_key,
+                tempo_mark=tempo_mark,
+                measure_len_frac=measure_len_frac,
+                part_name="Guitar (TAB)",
+                grid_step=grid_step,
+                chords_by_measure=chords_map
+            )
+            score.append(tab_part)
+        elif clef_mode == "grand_staff":
             treble_notes = [n for n in quantized_notes if n["pitch"] >= 60]
             bass_notes = [n for n in quantized_notes if n["pitch"] < 60]
 
@@ -259,6 +313,8 @@ class ScoreQuantizer:
                     "m_offset": cur_start - (Fraction(m_index, 1) * measure_len_frac),
                     "dur_frac": cur_dur,
                     "velocity": vel,
+                    "string": n_item.get("string"),
+                    "fret": n_item.get("fret"),
                     "tie_type": "continue" if (is_tied_start and is_tied_stop) else ("start" if is_tied_start else ("stop" if is_tied_stop else None))
                 })
                 cur_start = cur_end
@@ -322,11 +378,24 @@ class ScoreQuantizer:
                         ch = chord.Chord(pitches)
                         ch.duration = duration.Duration(comp_dur)
                         ch.volume.velocity = simultaneous[0]["velocity"]
+                        for sn in simultaneous:
+                            if sn.get("string") is not None and sn.get("fret") is not None:
+                                try:
+                                    ch.articulations.append(articulations.StringIndication(int(sn["string"])))
+                                    ch.articulations.append(articulations.FretIndication(int(sn["fret"])))
+                                except Exception:
+                                    pass
                         m.append(ch)
                     else:
                         n = note.Note(n_info["pitch"])
                         n.duration = duration.Duration(comp_dur)
                         n.volume.velocity = n_info["velocity"]
+                        if n_info.get("string") is not None and n_info.get("fret") is not None:
+                            try:
+                                n.articulations.append(articulations.StringIndication(int(n_info["string"])))
+                                n.articulations.append(articulations.FretIndication(int(n_info["fret"])))
+                            except Exception:
+                                pass
                         
                         # Tie handling
                         if n_info.get("tie_type"):
