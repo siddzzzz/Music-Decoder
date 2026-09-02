@@ -141,7 +141,8 @@ class ScoreQuantizer:
                 "end_frac": q_start + q_dur,
                 "velocity": int(ev.get("velocity", 80)),
                 "string": tab_info.get("string"),
-                "fret": tab_info.get("fret")
+                "fret": tab_info.get("fret"),
+                "lyric": ev.get("lyric")
             })
 
         # Separate into staves
@@ -315,6 +316,7 @@ class ScoreQuantizer:
                     "velocity": vel,
                     "string": n_item.get("string"),
                     "fret": n_item.get("fret"),
+                    "lyric": n_item.get("lyric"),
                     "tie_type": "continue" if (is_tied_start and is_tied_stop) else ("start" if is_tied_start else ("stop" if is_tied_stop else None))
                 })
                 cur_start = cur_end
@@ -385,6 +387,11 @@ class ScoreQuantizer:
                                     ch.articulations.append(articulations.FretIndication(int(sn["fret"])))
                                 except Exception:
                                     pass
+                            if sn.get("lyric") and c_idx == 0:
+                                try:
+                                    ch.lyric = str(sn["lyric"])
+                                except Exception:
+                                    pass
                         m.append(ch)
                     else:
                         n = note.Note(n_info["pitch"])
@@ -394,6 +401,11 @@ class ScoreQuantizer:
                             try:
                                 n.articulations.append(articulations.StringIndication(int(n_info["string"])))
                                 n.articulations.append(articulations.FretIndication(int(n_info["fret"])))
+                            except Exception:
+                                pass
+                        if n_info.get("lyric") and c_idx == 0:
+                            try:
+                                n.lyric = str(n_info["lyric"])
                             except Exception:
                                 pass
                         

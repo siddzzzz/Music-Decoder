@@ -193,6 +193,10 @@ class ScoreExporter:
             note_name = n.get("name") or pretty_midi.note_number_to_name(n["pitch"])
             d.add(String(nx - 4, staff_top_y - 42, note_name, fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#64748b")))
 
+            # Lyric label below notehead
+            if n.get("lyric"):
+                d.add(String(nx - 6, staff_top_y - 54, str(n["lyric"])[:8], fontName="Helvetica-Bold", fontSize=7.5, fillColor=colors.HexColor("#8b5cf6")))
+
         # Bass staff (if grand staff)
         if clef_mode == "grand_staff":
             bass_top_y = 50
@@ -236,27 +240,30 @@ class ScoreExporter:
         story.append(d)
         story.append(Spacer(1, 14))
 
+        # Singing Lyrics Transcript (If any lyrics present)
+        lyric_notes = [n for n in note_events if n.get("lyric")]
+        if lyric_notes:
+            story.append(Paragraph("Vocal Lyrics & Syllable Transcript", section_heading))
+            full_lyrics_text = " ".join([str(n["lyric"]) for n in lyric_notes])
+            story.append(Paragraph(f"<i>&ldquo;{full_lyrics_text}&rdquo;</i>", styles['Normal']))
+            story.append(Spacer(1, 10))
+
         # Transcribed Note Events Table
         story.append(Paragraph("Transcribed Notes Summary", section_heading))
         table_rows = [
-            ["#", "Note Name", "MIDI Pitch", "Start (s)", "Duration (s)", "String / Fret", "Velocity"]
+            ["#", "Note Name", "MIDI Pitch", "Start (s)", "Duration (s)", "Lyric Word", "Velocity"]
         ]
         
-        tab_lookup = {}
-        for tn in GuitarTabEngine.optimize_tablature(note_events):
-            tab_lookup[(int(tn["pitch"]), round(float(tn.get("start", 0)), 2))] = (tn.get("string"), tn.get("fret"))
-
         for i, n in enumerate(note_events[:30]):  # Show up to first 30 notes in summary table
             note_name = n.get("name") or pretty_midi.note_number_to_name(n["pitch"])
-            sf = tab_lookup.get((int(n["pitch"]), round(float(n.get("start", 0)), 2)))
-            sf_str = f"Str {sf[0]}, Fr {sf[1]}" if sf and sf[0] is not None else "-"
+            lyric_str = str(n.get("lyric", "-")) if n.get("lyric") else "-"
             table_rows.append([
                 str(i + 1),
                 note_name,
                 str(n["pitch"]),
                 f"{n['start']:.2f}",
                 f"{n['duration']:.2f}",
-                sf_str,
+                lyric_str,
                 str(n["velocity"])
             ])
 

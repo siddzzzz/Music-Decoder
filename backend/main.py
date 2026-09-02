@@ -23,6 +23,7 @@ from engine.sample_generator import SampleGenerator
 from engine.multitrack_engine import MultiTrackEngine
 from engine.chord_detector import ChordDetector
 from engine.tab_engine import GuitarTabEngine
+from engine.lyrics_aligner import LyricsAligner
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -210,6 +211,15 @@ def _process_transcription(
         midi_tempo=effective_bpm
     )
 
+    # 2.5 Extract & Align Singing Lyrics
+    lyrics_words = []
+    try:
+        lyrics_words = LyricsAligner.transcribe_vocals(audio_path)
+        if lyrics_words:
+            note_events = LyricsAligner.align_words_to_notes(note_events, lyrics_words)
+    except Exception as e:
+        print(f"[Main] Warning: Lyrics alignment skipped: {e}")
+
     # 3. Musical Quantization & MusicXML Construction
     score = ScoreQuantizer.build_score(
         note_events=note_events,
@@ -245,6 +255,8 @@ def _process_transcription(
     chord_progression = ChordDetector.analyze_chords_by_measure(note_events, effective_bpm, time_signature)
     tab_notes = GuitarTabEngine.optimize_tablature(note_events, is_bass=(clef_mode == "bass"))
     ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, effective_bpm, time_signature)
+    
+    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
 
     return {
         "task_id": task_id,
@@ -266,6 +278,7 @@ def _process_transcription(
         "tab_notes": tab_notes,
         "ascii_tab": ascii_tab,
         "chords": chord_progression,
+        "lyrics": lyrics_words,
         "waveform": audio_features["waveform"],
         "beat_times": audio_features["beat_times"],
         "musicxml": musicxml_content,
@@ -409,7 +422,20 @@ def _process_multitrack_transcription(
     effective_bpm = mt_result["tempo"]
     effective_tonic = mt_result["key"]["tonic"]
     effective_mode = mt_result["key"]["mode"]
-    tracks = mt_result["tracks"]
+    # Extract & Align Vocal Lyrics from Vocals stem (if present)
+    lyrics_words = []
+    vocals_stem_path = task_dir / "stems" / "vocals.wav"
+    if vocals_stem_path.exists():
+        try:
+            lyrics_words = LyricsAligner.transcribe_vocals(str(vocals_stem_path))
+            if lyrics_words and "vocals" in tracks:
+                tracks["vocals"]["notes"] = LyricsAligner.align_words_to_notes(tracks["vocals"]["notes"], lyrics_words)
+                # update all_notes
+                mt_result["all_notes"] = []
+                for t_data in tracks.values():
+                    mt_result["all_notes"].extend(t_data["notes"])
+        except Exception as e:
+            print(f"[MultiTrack] Warning: Lyrics alignment skipped: {e}")
 
     # Build Multi-Staff Orchestral Score
     score = ScoreQuantizer.build_multitrack_score(
@@ -467,6 +493,7 @@ def _process_multitrack_transcription(
         "tab_notes": mt_tab_notes,
         "ascii_tab": mt_ascii_tab,
         "chords": mt_chords,
+        "lyrics": lyrics_words,
         "waveform": mt_result["waveform"],
         "beat_times": mt_result["beat_times"],
         "tracks": tracks,
@@ -583,6 +610,10 @@ async def re_quantize_score(req: ReQuantizeRequest):
         ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, req.bpm, req.time_signature)
 
     musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+    lyrics_words = [
+        {"word": n["lyric"], "start": n["start"], "end": n["end"], "note_pitch": n["pitch"], "confidence": 1.0}
+        for n in sorted_notes if n.get("lyric")
+    ]
 
     return {
         "task_id": req.task_id,
@@ -602,6 +633,7 @@ async def re_quantize_score(req: ReQuantizeRequest):
         "tab_notes": tab_notes,
         "ascii_tab": ascii_tab,
         "chords": chord_progression,
+        "lyrics": lyrics_words,
         "tracks": req.tracks,
         "musicxml": musicxml_content,
         "exports": {
