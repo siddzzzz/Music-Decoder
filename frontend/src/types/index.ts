@@ -10,6 +10,15 @@ export interface NoteEvent {
   instrument?: string;
   string?: number;
   fret?: number;
+  lyric?: string;
+}
+
+export interface LyricWord {
+  word: string;
+  start: number;
+  end: number;
+  confidence: number;
+  note_pitch?: number;
 }
 
 export interface KeySignatureInfo {
@@ -64,6 +73,7 @@ export interface TranscriptionResult {
   tab_notes?: NoteEvent[];
   ascii_tab?: string;
   chords?: ChordInfo[];
+  lyrics?: LyricWord[];
   waveform?: number[];
   beat_times?: number[];
   tracks?: Record<string, StemTrackInfo>;

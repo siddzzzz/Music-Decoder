@@ -159,6 +159,17 @@ body {
   box-shadow: 0 6px 24px 0 rgba(217, 119, 6, 0.55);
 }
 
+.btn-pink {
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 20px -2px rgba(236, 72, 153, 0.45);
+}
+
+.btn-pink:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px 0 rgba(236, 72, 153, 0.6);
+}
+
 .btn-secondary {
   background: rgba(30, 41, 59, 0.6);
   border-color: var(--border-subtle);

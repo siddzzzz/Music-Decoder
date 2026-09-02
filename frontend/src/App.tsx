@@ -11,7 +11,8 @@ import {
   Cpu,
   RefreshCw,
   Sparkles,
-  Music2
+  Music2,
+  Mic2
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
@@ -27,6 +28,7 @@ import { ExportModal } from './components/ExportModal';
 import { StemMixer } from './components/StemMixer';
 import { NoteEditorModal } from './components/NoteEditorModal';
 import { GuitarFretboard } from './components/GuitarFretboard';
+import { LyricsKaraokeViewer } from './components/LyricsKaraokeViewer';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -37,7 +39,7 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'karaoke' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
@@ -82,7 +84,7 @@ export const App: React.FC = () => {
         particleCount: 90,
         spread: 75,
         origin: { y: 0.6 },
-        colors: ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b']
+        colors: ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899']
       });
     } catch (e) {
       // ignore
@@ -93,7 +95,7 @@ export const App: React.FC = () => {
     setIsLoading(true);
     setLoadingMessage(
       options.mode === 'multitrack'
-        ? `Running Demucs AI stem separation & orchestral transcription on "${file.name}" (CUDA GPU)...`
+        ? `Running Demucs stem separation & Whisper lyrics extraction on "${file.name}" (CUDA GPU)...`
         : `Analyzing audio & transcribing "${file.name}"...`
     );
     setLastUploadedFile(file);
@@ -131,6 +133,8 @@ export const App: React.FC = () => {
       setResult(res);
       if (sampleId === 'acoustic_guitar') {
         setActiveTab('guitar_tab');
+      } else if (res.lyrics && res.lyrics.length > 0) {
+        setActiveTab('karaoke');
       } else if (res.is_multitrack) {
         setActiveTab('score');
       }
@@ -179,10 +183,18 @@ export const App: React.FC = () => {
     setHasPendingEdits(true);
   };
 
+  const handleUpdateNoteLyric = (noteIndex: number, newLyric: string) => {
+    if (!result || !result.notes[noteIndex]) return;
+    const updatedNotes = [...result.notes];
+    updatedNotes[noteIndex] = { ...updatedNotes[noteIndex], lyric: newLyric };
+    setResult({ ...result, notes: updatedNotes });
+    setHasPendingEdits(true);
+  };
+
   const handleApplyEdits = async () => {
     if (!result) return;
     setIsLoading(true);
-    setLoadingMessage('Re-quantizing edited notes, recalculating guitar TAB, and engraving updated score...');
+    setLoadingMessage('Re-quantizing notes, updating lyrics in MusicXML, and re-engraving score...');
 
     try {
       const res = await reQuantizeScore({
@@ -291,6 +303,13 @@ export const App: React.FC = () => {
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                     {result.notes_count} Notes Detected
                   </span>
+
+                  {result.lyrics && result.lyrics.length > 0 && (
+                    <span className="badge badge-pink" style={{ fontSize: '0.68rem', background: 'rgba(236, 72, 153, 0.2)', color: '#f472b6', border: '1px solid rgba(236, 72, 153, 0.4)' }}>
+                      <Mic2 size={11} />
+                      <span>{result.lyrics.length} VOCAL WORDS ALIGNED</span>
+                    </span>
+                  )}
                 </div>
 
                 <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
@@ -370,7 +389,7 @@ export const App: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />
                   <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#fde68a' }}>
-                    You have modified note events in the visual editor.
+                    You have modified note events or lyrics in the visual editor.
                   </span>
                 </div>
 
@@ -419,6 +438,15 @@ export const App: React.FC = () => {
               )}
 
               <button
+                className={`btn ${activeTab === 'karaoke' ? 'btn-pink' : 'btn-secondary'}`}
+                style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+                onClick={() => setActiveTab('karaoke')}
+              >
+                <Mic2 size={16} color={activeTab === 'karaoke' ? '#ffffff' : '#f472b6'} />
+                <span>Vocal Lyrics & Karaoke</span>
+              </button>
+
+              <button
                 className={`btn ${activeTab === 'guitar_tab' ? 'btn-amber' : 'btn-secondary'}`}
                 style={{ padding: '8px 16px', fontSize: '0.86rem' }}
                 onClick={() => setActiveTab('guitar_tab')}
@@ -462,6 +490,14 @@ export const App: React.FC = () => {
 
             {activeTab === 'mixer' && result.is_multitrack && (
               <StemMixer result={result} />
+            )}
+
+            {activeTab === 'karaoke' && (
+              <LyricsKaraokeViewer
+                result={result}
+                onUpdateNoteLyric={handleUpdateNoteLyric}
+                onApplyEdits={handleApplyEdits}
+              />
             )}
 
             {activeTab === 'guitar_tab' && (
