@@ -12,7 +12,8 @@ import {
   RefreshCw,
   Sparkles,
   Music2,
-  Mic2
+  Mic2,
+  Disc
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
@@ -29,6 +30,7 @@ import { StemMixer } from './components/StemMixer';
 import { NoteEditorModal } from './components/NoteEditorModal';
 import { GuitarFretboard } from './components/GuitarFretboard';
 import { LyricsKaraokeViewer } from './components/LyricsKaraokeViewer';
+import { DrumKitVisualizer } from './components/DrumKitVisualizer';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -39,7 +41,7 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'karaoke' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'karaoke' | 'drums' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
@@ -95,7 +97,7 @@ export const App: React.FC = () => {
     setIsLoading(true);
     setLoadingMessage(
       options.mode === 'multitrack'
-        ? `Running Demucs stem separation & Whisper lyrics extraction on "${file.name}" (CUDA GPU)...`
+        ? `Running Demucs stem separation, Whisper lyrics & drum kit decomposition on "${file.name}" (CUDA GPU)...`
         : `Analyzing audio & transcribing "${file.name}"...`
     );
     setLastUploadedFile(file);
@@ -120,7 +122,7 @@ export const App: React.FC = () => {
     const target = samples.find(s => s.id === sampleId);
     setLoadingMessage(
       options.mode === 'multitrack' || sampleId === 'orchestra_ensemble'
-        ? `Running Neural Stem Separation (CUDA) on ${target?.name || 'sample'}...`
+        ? `Running Neural Stem Separation (CUDA) & Drum Kit extraction on ${target?.name || 'sample'}...`
         : `Running AI neural transcription on ${target?.name || 'sample'}...`
     );
     setLastSampleId(sampleId);
@@ -194,7 +196,7 @@ export const App: React.FC = () => {
   const handleApplyEdits = async () => {
     if (!result) return;
     setIsLoading(true);
-    setLoadingMessage('Re-quantizing notes, updating lyrics in MusicXML, and re-engraving score...');
+    setLoadingMessage('Re-quantizing notes, updating drum notation in MusicXML, and re-engraving score...');
 
     try {
       const res = await reQuantizeScore({
@@ -438,6 +440,15 @@ export const App: React.FC = () => {
               )}
 
               <button
+                className={`btn ${activeTab === 'drums' ? 'btn-amber' : 'btn-secondary'}`}
+                style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+                onClick={() => setActiveTab('drums')}
+              >
+                <Disc size={16} color={activeTab === 'drums' ? '#ffffff' : '#f59e0b'} />
+                <span>Drum Kit & Percussion</span>
+              </button>
+
+              <button
                 className={`btn ${activeTab === 'karaoke' ? 'btn-pink' : 'btn-secondary'}`}
                 style={{ padding: '8px 16px', fontSize: '0.86rem' }}
                 onClick={() => setActiveTab('karaoke')}
@@ -490,6 +501,10 @@ export const App: React.FC = () => {
 
             {activeTab === 'mixer' && result.is_multitrack && (
               <StemMixer result={result} />
+            )}
+
+            {activeTab === 'drums' && (
+              <DrumKitVisualizer result={result} />
             )}
 
             {activeTab === 'karaoke' && (
