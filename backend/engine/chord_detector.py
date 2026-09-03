@@ -125,7 +125,10 @@ class ChordDetector:
         if not note_events:
             return []
 
-        max_time = max(float(n["end"]) for n in note_events)
+        def get_n_end(n):
+            return float(n.get("end") if n.get("end") is not None else (float(n.get("start", 0)) + float(n.get("duration", 0.5))))
+
+        max_time = max(get_n_end(n) for n in note_events)
         total_measures = int(np.ceil(max_time / measure_duration_s))
 
         progression = []
@@ -137,7 +140,7 @@ class ChordDetector:
             # Notes overlapping with this measure
             m_notes = [
                 n for n in note_events
-                if float(n["start"]) < m_end and float(n["end"]) > m_start
+                if float(n.get("start", 0)) < m_end and get_n_end(n) > m_start
             ]
 
             chord_info = cls.detect_chord_from_notes(m_notes)

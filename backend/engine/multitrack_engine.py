@@ -12,6 +12,7 @@ import librosa
 from engine.audio_processor import AudioProcessor
 from engine.stem_separator import StemSeparator
 from engine.transcriber import Transcriber
+from engine.drum_transcriber import DrumTranscriber
 
 
 class MultiTrackEngine:
@@ -134,22 +135,18 @@ class MultiTrackEngine:
         if "drums" in stems and os.path.exists(stems["drums"]):
             d_audio, _ = librosa.load(stems["drums"], sr=22050, mono=True)
             d_wave = [round(float(v), 4) for v in np.abs(d_audio[::max(1, len(d_audio) // 400)])[:400]]
-            # Extract percussive onsets
-            onset_frames = librosa.onset.onset_detect(y=d_audio, sr=22050, units='time')
-            drum_notes = []
-            for t_val in onset_frames:
-                # Map drum onsets to standard GM MIDI Kick (36) or Snare (38)
-                drum_notes.append({
-                    "pitch": 36,
-                    "name": "C2 (Percussion)",
-                    "start": round(float(t_val), 3),
-                    "end": round(float(t_val + 0.15), 3),
-                    "duration": 0.15,
-                    "velocity": 95,
-                    "amplitude": 0.8,
-                    "track": "drums",
-                    "instrument": "Percussion"
-                })
+            
+            # Decompose drum audio into Kick, Snare, Hi-Hats, Toms, Cymbals
+            drum_notes = DrumTranscriber.transcribe_drum_audio(stems["drums"])
+            if not drum_notes:
+                # Fallback to onset detection if acoustic energy was quiet
+                onset_frames = librosa.onset.onset_detect(y=d_audio, sr=22050, units='time')
+                raw_drum_onsets = [
+                    {"pitch": 36, "start": round(float(t_val), 3), "end": round(float(t_val + 0.15), 3), "duration": 0.15, "velocity": 90}
+                    for t_val in onset_frames
+                ]
+                drum_notes = DrumTranscriber.convert_notes_to_drum_notation(raw_drum_onsets)
+
             tracks["drums"] = {
                 "name": "Drums / Percussion",
                 "instrument": "Drum Kit",

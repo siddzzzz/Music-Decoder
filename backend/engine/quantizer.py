@@ -234,7 +234,8 @@ class ScoreQuantizer:
                 "treble": clef.TrebleClef(),
                 "bass": clef.BassClef(),
                 "alto": clef.AltoClef(),
-                "tenor": clef.TenorClef()
+                "tenor": clef.TenorClef(),
+                "percussion": clef.PercussionClef()
             }
             chosen_clef = clef_map.get(clef_mode, clef.TrebleClef())
             solo_part = cls._assemble_part(
@@ -317,6 +318,8 @@ class ScoreQuantizer:
                     "string": n_item.get("string"),
                     "fret": n_item.get("fret"),
                     "lyric": n_item.get("lyric"),
+                    "notehead": n_item.get("notehead"),
+                    "staff_pitch": n_item.get("staff_pitch"),
                     "tie_type": "continue" if (is_tied_start and is_tied_stop) else ("start" if is_tied_start else ("stop" if is_tied_stop else None))
                 })
                 cur_start = cur_end
@@ -376,7 +379,7 @@ class ScoreQuantizer:
                 for c_idx, comp_dur in enumerate(dur_components):
                     is_sub_tied = (len(dur_components) > 1)
                     if len(simultaneous) > 1:
-                        pitches = [sn["pitch"] for sn in simultaneous]
+                        pitches = [sn.get("staff_pitch") or sn["pitch"] for sn in simultaneous]
                         ch = chord.Chord(pitches)
                         ch.duration = duration.Duration(comp_dur)
                         ch.volume.velocity = simultaneous[0]["velocity"]
@@ -392,9 +395,15 @@ class ScoreQuantizer:
                                     ch.lyric = str(sn["lyric"])
                                 except Exception:
                                     pass
+                            if sn.get("notehead"):
+                                try:
+                                    ch.notehead = str(sn["notehead"])
+                                except Exception:
+                                    pass
                         m.append(ch)
                     else:
-                        n = note.Note(n_info["pitch"])
+                        pitch_val = n_info.get("staff_pitch") or n_info["pitch"]
+                        n = note.Note(pitch_val)
                         n.duration = duration.Duration(comp_dur)
                         n.volume.velocity = n_info["velocity"]
                         if n_info.get("string") is not None and n_info.get("fret") is not None:
@@ -406,6 +415,11 @@ class ScoreQuantizer:
                         if n_info.get("lyric") and c_idx == 0:
                             try:
                                 n.lyric = str(n_info["lyric"])
+                            except Exception:
+                                pass
+                        if n_info.get("notehead"):
+                            try:
+                                n.notehead = str(n_info["notehead"])
                             except Exception:
                                 pass
                         
@@ -602,6 +616,12 @@ class ScoreQuantizer:
 
             q_list.append({
                 "pitch": int(ev["pitch"]),
+                "staff_pitch": ev.get("staff_pitch"),
+                "notehead": ev.get("notehead"),
+                "piece": ev.get("piece"),
+                "lyric": ev.get("lyric"),
+                "string": ev.get("string"),
+                "fret": ev.get("fret"),
                 "start_frac": q_start,
                 "dur_frac": q_dur,
                 "end_frac": q_start + q_dur,
