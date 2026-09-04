@@ -13,7 +13,8 @@ import {
   Sparkles,
   Music2,
   Mic2,
-  Disc
+  Disc,
+  PlaySquare
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
@@ -31,6 +32,7 @@ import { NoteEditorModal } from './components/NoteEditorModal';
 import { GuitarFretboard } from './components/GuitarFretboard';
 import { LyricsKaraokeViewer } from './components/LyricsKaraokeViewer';
 import { DrumKitVisualizer } from './components/DrumKitVisualizer';
+import { WaterfallVisualizer } from './components/WaterfallVisualizer';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -41,7 +43,7 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'pianoroll' | 'guitar_tab' | 'karaoke' | 'drums' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'waterfall' | 'pianoroll' | 'guitar_tab' | 'drums' | 'karaoke' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
@@ -97,7 +99,7 @@ export const App: React.FC = () => {
     setIsLoading(true);
     setLoadingMessage(
       options.mode === 'multitrack'
-        ? `Running Demucs stem separation, Whisper lyrics & drum kit decomposition on "${file.name}" (CUDA GPU)...`
+        ? `Running Demucs stem separation, Whisper lyrics & waterfall decomposition on "${file.name}" (CUDA GPU)...`
         : `Analyzing audio & transcribing "${file.name}"...`
     );
     setLastUploadedFile(file);
@@ -122,7 +124,7 @@ export const App: React.FC = () => {
     const target = samples.find(s => s.id === sampleId);
     setLoadingMessage(
       options.mode === 'multitrack' || sampleId === 'orchestra_ensemble'
-        ? `Running Neural Stem Separation (CUDA) & Drum Kit extraction on ${target?.name || 'sample'}...`
+        ? `Running Neural Stem Separation (CUDA) on ${target?.name || 'sample'}...`
         : `Running AI neural transcription on ${target?.name || 'sample'}...`
     );
     setLastSampleId(sampleId);
@@ -135,6 +137,8 @@ export const App: React.FC = () => {
       setResult(res);
       if (sampleId === 'acoustic_guitar') {
         setActiveTab('guitar_tab');
+      } else if (sampleId === 'classical_piano') {
+        setActiveTab('waterfall');
       } else if (res.lyrics && res.lyrics.length > 0) {
         setActiveTab('karaoke');
       } else if (res.is_multitrack) {
@@ -196,7 +200,7 @@ export const App: React.FC = () => {
   const handleApplyEdits = async () => {
     if (!result) return;
     setIsLoading(true);
-    setLoadingMessage('Re-quantizing notes, updating drum notation in MusicXML, and re-engraving score...');
+    setLoadingMessage('Re-quantizing notes, updating MusicXML, and re-engraving score...');
 
     try {
       const res = await reQuantizeScore({
@@ -440,6 +444,15 @@ export const App: React.FC = () => {
               )}
 
               <button
+                className={`btn ${activeTab === 'waterfall' ? 'btn-cyan' : 'btn-secondary'}`}
+                style={{ padding: '8px 16px', fontSize: '0.86rem' }}
+                onClick={() => setActiveTab('waterfall')}
+              >
+                <PlaySquare size={16} color={activeTab === 'waterfall' ? '#ffffff' : '#06b6d4'} />
+                <span>Waterfall Visualizer</span>
+              </button>
+
+              <button
                 className={`btn ${activeTab === 'drums' ? 'btn-amber' : 'btn-secondary'}`}
                 style={{ padding: '8px 16px', fontSize: '0.86rem' }}
                 onClick={() => setActiveTab('drums')}
@@ -501,6 +514,10 @@ export const App: React.FC = () => {
 
             {activeTab === 'mixer' && result.is_multitrack && (
               <StemMixer result={result} />
+            )}
+
+            {activeTab === 'waterfall' && (
+              <WaterfallVisualizer result={result} />
             )}
 
             {activeTab === 'drums' && (
