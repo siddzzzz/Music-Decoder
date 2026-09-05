@@ -196,7 +196,7 @@ export const PianoRoll: React.FC<PianoRollProps> = ({
       const isHovered = hoveredNote === note;
       const isCurrentlyPlaying = isPlaying && playheadTime >= note.start && playheadTime <= note.end;
 
-      // Note Color based on track or velocity
+      // Note Color based on voice, track or velocity
       const trackColors: Record<string, string> = {
         lead: '#06b6d4',
         harmony: '#a855f7',
@@ -212,6 +212,12 @@ export const PianoRoll: React.FC<PianoRollProps> = ({
         ctx.fillStyle = '#f43f5e';
         ctx.shadowColor = '#f43f5e';
         ctx.shadowBlur = 10;
+      } else if (note.voice === 2) {
+        ctx.fillStyle = '#06b6d4'; // Voice 2 (Stems Down)
+        ctx.shadowBlur = 0;
+      } else if (note.voice === 1 && notes.some(n => n.voice === 2)) {
+        ctx.fillStyle = '#f59e0b'; // Voice 1 (Stems Up)
+        ctx.shadowBlur = 0;
       } else if (note.track && trackColors[note.track]) {
         ctx.fillStyle = trackColors[note.track];
         ctx.shadowBlur = 0;
@@ -226,12 +232,13 @@ export const PianoRoll: React.FC<PianoRollProps> = ({
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Note Name text inside note rectangle
+      // Note Name & Voice Stem Icon inside note rectangle
       if (w > 22 && h > 9) {
         ctx.fillStyle = '#ffffff';
         ctx.font = '9px Outfit, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(note.name, x + 3, y + (h / 2) + 3);
+        const voiceSymbol = note.voice === 2 ? ' ↓' : (note.voice === 1 && notes.some(n => n.voice === 2) ? ' ↑' : '');
+        ctx.fillText(`${note.name}${voiceSymbol}`, x + 3, y + (h / 2) + 3);
       }
     });
 

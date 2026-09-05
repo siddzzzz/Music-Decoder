@@ -60,6 +60,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <option value="grand_staff">Piano Grand Staff (Treble + Bass)</option>
             <option value="dual_tab">Dual Notation + 6-String Guitar TAB</option>
             <option value="guitar_tab">6-String Guitar Tablature (TAB)</option>
+            <option value="percussion">5-Line Drum & Percussion Clef</option>
             <option value="treble">Treble Clef (Guitar, Violin, Flute, Melody)</option>
             <option value="bass">Bass Clef (Cello, Electric Bass)</option>
             <option value="alto">Alto Clef (Viola)</option>

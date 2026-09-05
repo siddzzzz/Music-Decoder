@@ -11,6 +11,9 @@ export interface NoteEvent {
   string?: number;
   fret?: number;
   lyric?: string;
+  piece?: string;
+  voice?: number;
+  stem_dir?: 'up' | 'down';
 }
 
 export interface LyricWord {
@@ -104,4 +107,5 @@ export interface TranscriptionOptions {
   bpm_override?: number;
   key_tonic_override?: string;
   key_mode_override?: string;
+  voice_separation?: boolean;
 }
