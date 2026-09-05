@@ -5,6 +5,7 @@ import os
 import uuid
 import shutil
 import tempfile
+import pretty_midi
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -291,17 +292,88 @@ def _process_transcription(
     }
 
 
+@app.get("/api/export/{task_id}/booklet")
+def download_booklet(task_id: str):
+    """Download the complete Master Orchestral PDF Booklet with cover page and per-part pages."""
+    task_dir = TEMP_DIR / task_id
+    if not task_dir.exists():
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+
+    booklet_path = task_dir / "orchestral_booklet.pdf"
+    if not booklet_path.exists():
+        booklet_path = task_dir / "sheet_music.pdf"
+    if not booklet_path.exists():
+        raise HTTPException(status_code=404, detail="Booklet PDF not found")
+
+    return FileResponse(
+        str(booklet_path),
+        media_type="application/pdf",
+        filename=f"orchestral_master_booklet_{task_id[:8]}.pdf"
+    )
+
+
+@app.get("/api/export/{task_id}/part/{part_name}/{export_type}")
+def download_part_export(task_id: str, part_name: str, export_type: str):
+    """Download individual performer part export (pdf, musicxml, or midi)."""
+    task_dir = TEMP_DIR / task_id
+    if not task_dir.exists():
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+
+    parts_dir = task_dir / "parts"
+    ext_map = {
+        "pdf": (f"{part_name}.pdf", "application/pdf"),
+        "musicxml": (f"{part_name}.musicxml", "application/vnd.recordare.musicxml+xml"),
+        "midi": (f"{part_name}.mid", "audio/midi")
+    }
+
+    if export_type not in ext_map:
+        raise HTTPException(status_code=400, detail="Invalid export type. Supported: pdf, musicxml, midi")
+
+    filename, media_type = ext_map[export_type]
+    file_path = parts_dir / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Part file {filename} not found")
+
+    return FileResponse(
+        str(file_path),
+        media_type=media_type,
+        filename=f"{part_name}_part.{export_type if export_type != 'midi' else 'mid'}"
+    )
+
+
+@app.get("/api/export/{task_id}/stem/{stem_name}")
+def download_stem(task_id: str, stem_name: str):
+    """Download individual separated audio stem (vocals, other, bass, drums)."""
+    task_dir = TEMP_DIR / task_id / "stems"
+    stem_file = task_dir / f"{stem_name}.wav"
+    if not stem_file.exists():
+        # Fallback to general stem name mapping
+        name_map = {"lead": "vocals.wav", "harmony": "other.wav", "bass": "bass.wav", "drums": "drums.wav"}
+        alt_name = name_map.get(stem_name)
+        if alt_name and (task_dir / alt_name).exists():
+            stem_file = task_dir / alt_name
+        else:
+            raise HTTPException(status_code=404, detail="Stem file not found")
+
+    return FileResponse(str(stem_file), media_type="audio/wav", filename=f"{stem_name}_stem.wav")
+
+
 @app.get("/api/export/{task_id}/{export_type}")
 def download_export(task_id: str, export_type: str):
-    """Download the generated export files (midi, musicxml, pdf, or original audio)."""
+    """Download the generated export files (midi, musicxml, pdf, booklet, or original audio)."""
     task_dir = TEMP_DIR / task_id
     if not task_dir.exists():
         raise HTTPException(status_code=404, detail="Transcription task expired or not found")
 
+    if export_type == "booklet":
+        return download_booklet(task_id)
+
     file_mapping = {
         "midi": (task_dir / "transcription.mid", "audio/midi", "transcription.mid"),
         "musicxml": (task_dir / "score.musicxml", "application/vnd.recordare.musicxml+xml", "score.musicxml"),
-        "pdf": (task_dir / "sheet_music.pdf", "application/pdf", "sheet_music.pdf")
+        "pdf": (task_dir / "sheet_music.pdf", "application/pdf", "sheet_music.pdf"),
+        "booklet": (task_dir / "orchestral_booklet.pdf", "application/pdf", "orchestral_master_booklet.pdf")
     }
 
     if export_type == "audio":
@@ -316,6 +388,10 @@ def download_export(task_id: str, export_type: str):
 
     file_path, media_type, download_name = file_mapping[export_type]
     if not file_path.exists():
+        if export_type == "booklet":
+            file_path = task_dir / "sheet_music.pdf"
+            if file_path.exists():
+                return FileResponse(str(file_path), media_type="application/pdf", filename="sheet_music.pdf")
         raise HTTPException(status_code=404, detail=f"{export_type.upper()} export not found")
 
     return FileResponse(str(file_path), media_type=media_type, filename=download_name)
@@ -422,14 +498,16 @@ def _process_multitrack_transcription(
     effective_bpm = mt_result["tempo"]
     effective_tonic = mt_result["key"]["tonic"]
     effective_mode = mt_result["key"]["mode"]
+    tracks = mt_result["tracks"]
+
     # Extract & Align Vocal Lyrics from Vocals stem (if present)
     lyrics_words = []
     vocals_stem_path = task_dir / "stems" / "vocals.wav"
     if vocals_stem_path.exists():
         try:
             lyrics_words = LyricsAligner.transcribe_vocals(str(vocals_stem_path))
-            if lyrics_words and "vocals" in tracks:
-                tracks["vocals"]["notes"] = LyricsAligner.align_words_to_notes(tracks["vocals"]["notes"], lyrics_words)
+            if lyrics_words and "lead" in tracks:
+                tracks["lead"]["notes"] = LyricsAligner.align_words_to_notes(tracks["lead"]["notes"], lyrics_words)
                 # update all_notes
                 mt_result["all_notes"] = []
                 for t_data in tracks.values():
@@ -464,6 +542,20 @@ def _process_multitrack_transcription(
         key_signature=mt_result["key"]["display"],
         time_signature=time_signature,
         tracks=tracks
+    )
+
+    # Generate individual performer parts (PDF, MusicXML, MIDI) and master orchestral booklet
+    parts_booklet_info = _generate_parts_and_booklet(
+        task_dir=task_dir,
+        tracks=tracks,
+        effective_bpm=effective_bpm,
+        time_signature=time_signature,
+        effective_tonic=effective_tonic,
+        effective_mode=effective_mode,
+        quantization_grid=quantization_grid,
+        title=title,
+        composer=composer,
+        task_id=task_id
     )
 
     musicxml_content = ScoreQuantizer.to_musicxml_string(score)
@@ -503,8 +595,114 @@ def _process_multitrack_transcription(
             "musicxml": f"/api/export/{task_id}/musicxml",
             "pdf": f"/api/export/{task_id}/pdf",
             "audio": f"/api/export/{task_id}/audio",
+            "booklet": parts_booklet_info["booklet"],
+            "parts": parts_booklet_info["parts"],
             "stems": stem_exports
         }
+    }
+
+
+def _generate_parts_and_booklet(
+    task_dir: Path,
+    tracks: Dict[str, Any],
+    effective_bpm: float,
+    time_signature: str,
+    effective_tonic: str,
+    effective_mode: str,
+    quantization_grid: str,
+    title: str,
+    composer: str,
+    task_id: str
+) -> Dict[str, Any]:
+    """Generates standalone part PDF, MusicXML, MIDI for each track, plus Master Orchestral PDF Booklet."""
+    parts_dir = task_dir / "parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+
+    clef_modes = {
+        "lead": "treble",
+        "harmony": "grand_staff",
+        "bass": "bass",
+        "drums": "percussion"
+    }
+
+    parts_exports: Dict[str, Any] = {}
+    for track_id, track_info in tracks.items():
+        p_name = track_info.get("name", track_id.title())
+        p_inst = track_info.get("instrument", track_id.title())
+        p_notes = track_info.get("notes", [])
+        c_mode = clef_modes.get(track_id, "treble")
+
+        # 1. Part MusicXML
+        p_score = ScoreQuantizer.build_score(
+            note_events=p_notes,
+            bpm=effective_bpm,
+            time_signature_str=time_signature,
+            key_tonic=effective_tonic,
+            key_mode=effective_mode,
+            clef_mode=c_mode,
+            quantization_grid=quantization_grid,
+            title=f"{title} - {p_name.upper()} PART",
+            composer=composer
+        )
+        p_xml_path = parts_dir / f"{track_id}.musicxml"
+        ScoreExporter.save_musicxml(p_score, str(p_xml_path))
+
+        # 2. Part MIDI
+        p_pm = pretty_midi.PrettyMIDI(initial_tempo=effective_bpm)
+        prog_num = 33 if track_id == "bass" else (73 if track_id == "lead" else 0)
+        is_drum = (track_id == "drums")
+        inst_obj = pretty_midi.Instrument(program=prog_num, is_drum=is_drum, name=p_name)
+        for n in p_notes:
+            st = float(n.get("start", 0))
+            dur = float(n.get("duration", 0.5))
+            inst_obj.notes.append(
+                pretty_midi.Note(
+                    velocity=int(n.get("velocity", 80)),
+                    pitch=int(n["pitch"]),
+                    start=st,
+                    end=st + dur
+                )
+            )
+        p_pm.instruments.append(inst_obj)
+        p_midi_path = parts_dir / f"{track_id}.mid"
+        ScoreExporter.save_midi(p_pm, str(p_midi_path))
+
+        # 3. Part PDF
+        p_pdf_path = parts_dir / f"{track_id}.pdf"
+        ScoreExporter.generate_part_pdf_report(
+            output_path=str(p_pdf_path),
+            part_name=p_name,
+            instrument_name=p_inst,
+            title=title,
+            composer=composer,
+            bpm=effective_bpm,
+            key_signature=f"{effective_tonic} {effective_mode.capitalize()}",
+            time_signature=time_signature,
+            note_events=p_notes,
+            clef_mode=c_mode
+        )
+
+        parts_exports[track_id] = {
+            "pdf": f"/api/export/{task_id}/part/{track_id}/pdf",
+            "musicxml": f"/api/export/{task_id}/part/{track_id}/musicxml",
+            "midi": f"/api/export/{task_id}/part/{track_id}/midi"
+        }
+
+    # 4. Master Multi-Page Orchestral PDF Booklet
+    booklet_pdf_path = task_dir / "orchestral_booklet.pdf"
+    ScoreExporter.generate_orchestral_booklet(
+        output_path=str(booklet_pdf_path),
+        title=title,
+        composer=composer,
+        bpm=effective_bpm,
+        key_signature=f"{effective_tonic} {effective_mode.capitalize()}",
+        time_signature=time_signature,
+        tracks=tracks
+    )
+
+    return {
+        "booklet": f"/api/export/{task_id}/booklet",
+        "parts": parts_exports
     }
 
 
@@ -539,6 +737,8 @@ async def re_quantize_score(req: ReQuantizeRequest):
         elif "end" not in n and "duration" in n:
             n["end"] = round(float(n["start"]) + float(n["duration"]), 3)
 
+    parts_booklet_info = None
+
     if req.is_multitrack and req.tracks:
         # Multi-Track Re-quantization
         score = ScoreQuantizer.build_multitrack_score(
@@ -562,6 +762,18 @@ async def re_quantize_score(req: ReQuantizeRequest):
             key_signature=f"{req.key_tonic} {req.key_mode.capitalize()}",
             time_signature=req.time_signature,
             tracks=req.tracks
+        )
+        parts_booklet_info = _generate_parts_and_booklet(
+            task_dir=task_dir,
+            tracks=req.tracks,
+            effective_bpm=req.bpm,
+            time_signature=req.time_signature,
+            effective_tonic=req.key_tonic,
+            effective_mode=req.key_mode,
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Orchestral Score",
+            composer=req.composer or "Music-Decoder Editor",
+            task_id=req.task_id
         )
         chord_progression = ChordDetector.analyze_chords_by_measure(sorted_notes, req.bpm, req.time_signature)
         tab_notes = GuitarTabEngine.optimize_tablature(sorted_notes)
@@ -615,6 +827,16 @@ async def re_quantize_score(req: ReQuantizeRequest):
         for n in sorted_notes if n.get("lyric")
     ]
 
+    exports_dict: Dict[str, Any] = {
+        "midi": f"/api/export/{req.task_id}/midi",
+        "musicxml": f"/api/export/{req.task_id}/musicxml",
+        "pdf": f"/api/export/{req.task_id}/pdf",
+        "audio": f"/api/export/{req.task_id}/audio"
+    }
+    if parts_booklet_info:
+        exports_dict["booklet"] = parts_booklet_info["booklet"]
+        exports_dict["parts"] = parts_booklet_info["parts"]
+
     return {
         "task_id": req.task_id,
         "is_multitrack": req.is_multitrack,
@@ -636,29 +858,7 @@ async def re_quantize_score(req: ReQuantizeRequest):
         "lyrics": lyrics_words,
         "tracks": req.tracks,
         "musicxml": musicxml_content,
-        "exports": {
-            "midi": f"/api/export/{req.task_id}/midi",
-            "musicxml": f"/api/export/{req.task_id}/musicxml",
-            "pdf": f"/api/export/{req.task_id}/pdf",
-            "audio": f"/api/export/{req.task_id}/audio"
-        }
+        "exports": exports_dict
     }
-
-
-@app.get("/api/export/{task_id}/stem/{stem_name}")
-def download_stem(task_id: str, stem_name: str):
-    """Download individual separated audio stem (vocals, other, bass, drums)."""
-    task_dir = TEMP_DIR / task_id / "stems"
-    stem_file = task_dir / f"{stem_name}.wav"
-    if not stem_file.exists():
-        # Fallback to general stem name mapping
-        name_map = {"lead": "vocals.wav", "harmony": "other.wav", "bass": "bass.wav", "drums": "drums.wav"}
-        alt_name = name_map.get(stem_name)
-        if alt_name and (task_dir / alt_name).exists():
-            stem_file = task_dir / alt_name
-        else:
-            raise HTTPException(status_code=404, detail="Stem file not found")
-
-    return FileResponse(str(stem_file), media_type="audio/wav", filename=f"{stem_name}_stem.wav")
 
 

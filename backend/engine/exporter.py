@@ -541,3 +541,275 @@ class ScoreExporter:
         doc.build(story)
         return output_path
 
+    @classmethod
+    def generate_part_pdf_report(
+        cls,
+        output_path: str,
+        part_name: str,
+        instrument_name: str,
+        title: str,
+        composer: str,
+        bpm: float,
+        key_signature: str,
+        time_signature: str,
+        note_events: List[Dict[str, Any]],
+        clef_mode: str = "treble"
+    ) -> str:
+        """
+        Generates a dedicated, printable single-instrument part score PDF.
+        """
+        part_title = f"{title} — {part_name.upper()} PART"
+        part_composer = f"{composer} ({instrument_name})"
+        return cls.generate_pdf_report(
+            output_path=output_path,
+            title=part_title,
+            composer=part_composer,
+            bpm=bpm,
+            key_signature=key_signature,
+            time_signature=time_signature,
+            note_events=note_events,
+            clef_mode=clef_mode
+        )
+
+    @classmethod
+    def generate_orchestral_booklet(
+        cls,
+        output_path: str,
+        title: str,
+        composer: str,
+        bpm: float,
+        key_signature: str,
+        time_signature: str,
+        tracks: Dict[str, Any]
+    ) -> str:
+        """
+        Generates a master multi-page orchestral PDF booklet containing:
+        - Page 1: Cover Page with title, composer, instrumentation, key, tempo
+        - Page 2: Conductor's Full Master Score Summary
+        - Pages 3+: Dedicated extracted parts for each instrument with page breaks.
+        """
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+
+        styles = getSampleStyleSheet()
+
+        cover_title_style = ParagraphStyle(
+            'BookletCoverTitle',
+            parent=styles['Title'],
+            fontName='Helvetica-Bold',
+            fontSize=28,
+            leading=34,
+            textColor=colors.HexColor("#0f172a"),
+            alignment=1
+        )
+
+        cover_sub_style = ParagraphStyle(
+            'BookletCoverSub',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=13,
+            leading=18,
+            textColor=colors.HexColor("#475569"),
+            alignment=1
+        )
+
+        section_heading = ParagraphStyle(
+            'BookletSectionHeading',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=14,
+            leading=18,
+            textColor=colors.HexColor("#0f172a"),
+            spaceBefore=12,
+            spaceAfter=6
+        )
+
+        story = []
+
+        # =========================================================================
+        # PAGE 1: FORMAL COVER PAGE
+        # =========================================================================
+        story.append(Spacer(1, 100))
+        story.append(Paragraph(title, cover_title_style))
+        story.append(Spacer(1, 14))
+        story.append(Paragraph(f"Composed by {composer}", cover_sub_style))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("<b>COMPLETE ORCHESTRAL MASTER SCORE &amp; PERFORMER PARTS BOOKLET</b>", cover_sub_style))
+        story.append(Spacer(1, 40))
+
+        # Metadata pill box on cover
+        cover_meta = [
+            ["Key Signature", key_signature, "Tempo", f"{bpm:.1f} BPM"],
+            ["Time Signature", time_signature, "Orchestration", f"{len(tracks)} Instrument Staves"],
+            ["Engraved by", "Music-Decoder AI Studio", "Format", "Standard 5-Line + TAB Parts"]
+        ]
+        meta_table = Table(cover_meta, colWidths=[120, 150, 120, 150])
+        meta_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor("#1e293b")),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 60))
+
+        story.append(Paragraph("<i>Section I: Conductor's Full Score Overview &bull; Section II: Extracted Performer Parts</i>", cover_sub_style))
+        story.append(PageBreak())
+
+        # =========================================================================
+        # PAGE 2: CONDUCTOR'S FULL MASTER SCORE OVERVIEW
+        # =========================================================================
+        story.append(Paragraph(f"Section I: Conductor's Full Master Score", cover_title_style))
+        story.append(Spacer(1, 10))
+
+        # Instrument Staves Table
+        story.append(Paragraph("Orchestration Staves Overview", section_heading))
+        t_rows = [["Track ID", "Instrument / Stave Name", "Clef Type", "Note Count"]]
+        for t_id, t_info in tracks.items():
+            clef_str = "Treble Clef (𝄞)" if t_id == "lead" else ("Bass Clef (𝄢)" if t_id == "bass" else ("Percussion (𝄥)" if t_id == "drums" else "Grand Staff (𝄞/𝄢)"))
+            t_rows.append([t_id.upper(), t_info.get("name", t_id.title()), clef_str, str(len(t_info.get("notes", [])))])
+        
+        t_tbl = Table(t_rows, colWidths=[90, 200, 150, 100])
+        t_tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(t_tbl)
+        story.append(Spacer(1, 16))
+
+        # All Notes Summary Table
+        all_orch_notes = []
+        for t_id, t_info in tracks.items():
+            for n in t_info.get("notes", []):
+                all_orch_notes.append((t_id, n))
+        all_orch_notes.sort(key=lambda x: x[1].get("start", 0))
+
+        story.append(Paragraph(f"Master Chronological Events (Total {len(all_orch_notes)} Notes)", section_heading))
+        sum_rows = [["#", "Track", "Note Name", "MIDI Pitch", "Start Time", "Duration"]]
+        for idx, (t_id, n) in enumerate(all_orch_notes[:25]):
+            sum_rows.append([
+                str(idx + 1),
+                t_id.upper(),
+                n.get("name", str(n.get("pitch"))),
+                str(n.get("pitch")),
+                f"{float(n.get('start', 0)):.2f}s",
+                f"{float(n.get('duration', 0.5)):.2f}s"
+            ])
+        if len(all_orch_notes) > 25:
+            sum_rows.append(["...", "...", "...", "...", "...", "..."])
+
+        sum_tbl = Table(sum_rows, colWidths=[40, 100, 100, 100, 100, 100])
+        sum_tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(sum_tbl)
+        story.append(PageBreak())
+
+        # =========================================================================
+        # PAGES 3+: INDIVIDUAL EXTRACTED PERFORMER PARTS
+        # =========================================================================
+        clef_modes = {
+            "lead": "treble",
+            "harmony": "grand_staff",
+            "bass": "bass",
+            "drums": "percussion"
+        }
+
+        for p_idx, (track_id, track_info) in enumerate(tracks.items()):
+            p_name = track_info.get("name", track_id.title())
+            p_notes = track_info.get("notes", [])
+            c_mode = clef_modes.get(track_id, "treble")
+
+            story.append(Paragraph(f"Part {p_idx + 1}: {p_name.upper()}", cover_title_style))
+            story.append(Paragraph(f"<i>{title} &bull; Key: {key_signature} &bull; Tempo: {bpm:.1f} BPM &bull; Meter: {time_signature}</i>", cover_sub_style))
+            story.append(Spacer(1, 14))
+
+            # Staff Drawing Preview
+            d = Drawing(540, 75)
+            staff_y = 40
+            for l in range(5):
+                d.add(Line(20, staff_y - (l * 8), 520, staff_y - (l * 8), strokeColor=colors.HexColor("#475569"), strokeWidth=1))
+            
+            # Clef
+            clef_sym = "𝄞" if c_mode == "treble" else ("𝄢" if c_mode == "bass" else ("𝄥" if c_mode == "percussion" else "𝄞"))
+            d.add(String(28, staff_y - 25, clef_sym, fontName="Helvetica-Bold", fontSize=22, fillColor=colors.HexColor("#0f172a")))
+            d.add(String(55, staff_y - 12, time_signature.split('/')[0], fontName="Helvetica-Bold", fontSize=13, fillColor=colors.HexColor("#0f172a")))
+            d.add(String(55, staff_y - 28, time_signature.split('/')[1], fontName="Helvetica-Bold", fontSize=13, fillColor=colors.HexColor("#0f172a")))
+
+            # Draw sample notes
+            sample_notes = p_notes[:14]
+            sp = (490 - 85) / max(1, len(sample_notes))
+            for i, sn in enumerate(sample_notes):
+                nx = 85 + (i * sp)
+                pitch_off = (int(sn.get("pitch", 60)) - 60) * 1.8
+                ny = max(staff_y - 35, min(staff_y + 15, staff_y - 24 + pitch_off))
+                d.add(Circle(nx, ny, 3.5, fillColor=colors.HexColor("#0f172a"), strokeColor=colors.HexColor("#0f172a")))
+                d.add(Line(nx + 3, ny, nx + 3, ny + 18, strokeColor=colors.HexColor("#0f172a"), strokeWidth=1.2))
+                d.add(String(nx - 3, staff_y - 40, sn.get("name", ""), fontName="Helvetica", fontSize=7, fillColor=colors.HexColor("#64748b")))
+
+            story.append(d)
+            story.append(Spacer(1, 14))
+
+            # Part Note Table
+            story.append(Paragraph(f"Transcribed Note Events ({len(p_notes)} Total Notes)", section_heading))
+            part_rows = [["#", "Note Name", "MIDI Pitch", "Start Time", "Duration", "Velocity"]]
+            for n_i, pn in enumerate(p_notes[:30]):
+                part_rows.append([
+                    str(n_i + 1),
+                    pn.get("name", "-"),
+                    str(pn.get("pitch", "-")),
+                    f"{float(pn.get('start', 0)):.2f}s",
+                    f"{float(pn.get('duration', 0.5)):.2f}s",
+                    str(pn.get("velocity", 80))
+                ])
+            if len(p_notes) > 30:
+                part_rows.append(["...", f"Total {len(p_notes)} notes in {p_name}", "...", "...", "...", "..."])
+
+            p_tbl = Table(part_rows, colWidths=[40, 100, 100, 100, 100, 100])
+            p_tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#ffffff")),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(p_tbl)
+
+            if p_idx < len(tracks) - 1:
+                story.append(PageBreak())
+
+        doc.build(story)
+        return output_path
+

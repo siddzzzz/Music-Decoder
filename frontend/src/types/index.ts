@@ -42,11 +42,19 @@ export interface ChordInfo {
   end_time: number;
 }
 
+export interface PartExportInfo {
+  pdf: string;
+  musicxml: string;
+  midi: string;
+}
+
 export interface TranscriptionExports {
   midi: string;
   musicxml: string;
   pdf: string;
   audio: string;
+  booklet?: string;
+  parts?: Record<string, PartExportInfo>;
   stems?: Record<string, string>;
 }
 

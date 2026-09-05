@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
-import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Gauge, Sparkles } from 'lucide-react';
+import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Gauge, Sparkles, Layers } from 'lucide-react';
 import type { TranscriptionResult } from '../types';
 import { soundfontService, type SoundfontInstrumentName } from '../services/soundfont';
 
@@ -19,15 +19,53 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
   const [playMode, setPlayMode] = useState<'soundfont' | 'audio'>('soundfont');
   const [instrument, setInstrument] = useState<SoundfontInstrumentName>('acoustic_grand_piano');
   const [currentTime, setCurrentTime] = useState(0);
+  const [selectedPart, setSelectedPart] = useState<string>('all');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playTimerRef = useRef<number | null>(null);
   const playedNoteIndicesRef = useRef<Set<number>>(new Set());
 
+  // Determine active notes based on selected part
+  const activeNotes = React.useMemo(() => {
+    if (selectedPart === 'all' || !result.tracks || !result.tracks[selectedPart]) {
+      return result.notes;
+    }
+    return result.tracks[selectedPart].notes;
+  }, [selectedPart, result.notes, result.tracks]);
+
   // Load selected SoundFont instrument
   useEffect(() => {
     soundfontService.setInstrument(instrument);
   }, [instrument]);
+
+  // Apply instrument visibility when selectedPart changes
+  const applyPartVisibility = (osmd: OpenSheetMusicDisplay, part: string) => {
+    const sheet = (osmd as any).Sheet;
+    if (sheet && sheet.Instruments && sheet.Instruments.length > 1) {
+      const partKeys = ['lead', 'harmony', 'bass', 'drums'];
+      sheet.Instruments.forEach((inst: any, idx: number) => {
+        if (part === 'all') {
+          inst.Visible = true;
+        } else {
+          const instName = (inst.NameLabel?.text || inst.IdString || '').toLowerCase();
+          const targetIndex = partKeys.indexOf(part);
+          const isTarget = instName.includes(part) || (targetIndex !== -1 && idx === targetIndex);
+          inst.Visible = isTarget;
+        }
+      });
+      try {
+        osmd.render();
+      } catch (e) {
+        console.warn('OSMD part visibility update:', e);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (osmdRef.current) {
+      applyPartVisibility(osmdRef.current, selectedPart);
+    }
+  }, [selectedPart]);
 
   // Initialize or re-render OSMD whenever result or transpose/zoom changes
   useEffect(() => {
@@ -61,6 +99,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
           osmd.updateGraphic();
         } catch (e) { /* ignore */ }
       }
+      applyPartVisibility(osmd, selectedPart);
       osmd.render();
       osmd.cursor.show();
       osmdRef.current = osmd;
@@ -109,9 +148,9 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
         return;
       }
 
-      // Synthesize note events with authentic SoundFont
+      // Synthesize note events with authentic SoundFont for active part
       if (playMode === 'soundfont') {
-        result.notes.forEach((note, idx) => {
+        activeNotes.forEach((note, idx) => {
           if (!playedNoteIndicesRef.current.has(idx)) {
             if (elapsedSec >= note.start && elapsedSec <= note.start + 0.08) {
               playedNoteIndicesRef.current.add(idx);
@@ -125,9 +164,9 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
       // Step OSMD cursor based on progress
       if (osmdRef.current && osmdRef.current.cursor) {
         const cursor = osmdRef.current.cursor;
-        const totalNotes = result.notes.length;
+        const totalNotes = activeNotes.length;
         if (totalNotes > 0) {
-          const currentNoteIdx = result.notes.findIndex(n => n.start >= elapsedSec);
+          const currentNoteIdx = activeNotes.findIndex(n => n.start >= elapsedSec);
           if (currentNoteIdx > 0 && !cursor.iterator.EndReached) {
             cursor.next();
           }
@@ -140,7 +179,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
       if (audioRef.current) audioRef.current.pause();
       soundfontService.stop();
     };
-  }, [isPlaying, currentTime, playbackSpeed, playMode, transpose, result.notes, result.duration, result.exports.audio]);
+  }, [isPlaying, currentTime, playbackSpeed, playMode, transpose, activeNotes, result.duration, result.exports.audio]);
 
   const handlePlayToggle = () => {
     setIsPlaying(p => !p);
@@ -208,6 +247,42 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
           </div>
         </div>
 
+        {/* Multi-Track Part Filter Dropdown (If Multi-Track) */}
+        {(result.is_multitrack || (result.tracks && Object.keys(result.tracks).length > 1)) && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(15, 23, 42, 0.85)',
+            padding: '4px 10px',
+            borderRadius: 8,
+            border: '1px solid var(--border-active)'
+          }}>
+            <Layers size={14} color="#38bdf8" />
+            <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>Part View:</span>
+            <select
+              value={selectedPart}
+              onChange={(e) => setSelectedPart(e.target.value)}
+              className="input-control"
+              style={{
+                fontSize: '0.78rem',
+                padding: '3px 8px',
+                background: 'rgba(30, 41, 59, 0.9)',
+                border: '1px solid var(--border-subtle)',
+                color: '#ffffff',
+                borderRadius: 6,
+                fontWeight: 600
+              }}
+            >
+              <option value="all">🎼 All Staves (Conductor Master)</option>
+              <option value="lead">🪈 Lead Solo / Winds</option>
+              <option value="harmony">🎹 Harmony / Keys / Strings</option>
+              <option value="bass">🎸 Bassline</option>
+              <option value="drums">🥁 Drum Kit &amp; Percussion</option>
+            </select>
+          </div>
+        )}
+
         {/* Audio Mode & Realistic SoundFont Instrument Selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{
@@ -223,7 +298,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
               onClick={() => setPlayMode('soundfont')}
             >
               <Sparkles size={12} />
-              <span>SoundFont Playback</span>
+              <span>SoundFont</span>
             </button>
             <button
               className={`btn ${playMode === 'audio' ? 'btn-cyan' : 'btn-secondary'}`}
@@ -231,7 +306,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
               onClick={() => setPlayMode('audio')}
             >
               <Volume2 size={12} />
-              <span>Original Audio</span>
+              <span>Audio</span>
             </button>
           </div>
 
@@ -331,3 +406,4 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
     </div>
   );
 };
+
