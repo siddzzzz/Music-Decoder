@@ -9,6 +9,7 @@ import music21
 from music21 import stream, note, chord, meter, key, tempo, clef, layout, tie, metadata, duration, instrument, harmony, articulations
 from engine.chord_detector import ChordDetector
 from engine.tab_engine import GuitarTabEngine
+from engine.voice_separator import VoiceSeparator
 
 
 class ScoreQuantizer:
@@ -347,105 +348,130 @@ class ScoreQuantizer:
                     pass
 
             m_notes = measures_dict.get(m_idx, [])
-            m_notes.sort(key=lambda x: x["m_offset"])
+            v1_notes, v2_notes = VoiceSeparator.separate_measure_voices(m_notes)
 
-            curr_pos = Fraction(0, 1)
-            idx = 0
-            while idx < len(m_notes):
-                n_info = m_notes[idx]
-                target_offset = max(curr_pos, n_info["m_offset"])
-
-                # Insert rests if gap exists
-                gap = target_offset - curr_pos
-                if gap >= Fraction(1, 8):
-                    for rest_dur in cls.decompose_into_standard_durations(gap):
-                        r = note.Rest()
-                        r.duration = duration.Duration(rest_dur)
-                        m.append(r)
-                    curr_pos = target_offset
-
-                # Group chords
-                simultaneous = [n_info]
-                next_idx = idx + 1
-                while next_idx < len(m_notes) and m_notes[next_idx]["m_offset"] == n_info["m_offset"]:
-                    simultaneous.append(m_notes[next_idx])
-                    next_idx += 1
-
-                idx = next_idx
-                max_dur = max(sn["dur_frac"] for sn in simultaneous)
-
-                # Decompose note duration into standard components if complex
-                dur_components = cls.decompose_into_standard_durations(max_dur)
-                for c_idx, comp_dur in enumerate(dur_components):
-                    is_sub_tied = (len(dur_components) > 1)
-                    if len(simultaneous) > 1:
-                        pitches = [sn.get("staff_pitch") or sn["pitch"] for sn in simultaneous]
-                        ch = chord.Chord(pitches)
-                        ch.duration = duration.Duration(comp_dur)
-                        ch.volume.velocity = simultaneous[0]["velocity"]
-                        for sn in simultaneous:
-                            if sn.get("string") is not None and sn.get("fret") is not None:
-                                try:
-                                    ch.articulations.append(articulations.StringIndication(int(sn["string"])))
-                                    ch.articulations.append(articulations.FretIndication(int(sn["fret"])))
-                                except Exception:
-                                    pass
-                            if sn.get("lyric") and c_idx == 0:
-                                try:
-                                    ch.lyric = str(sn["lyric"])
-                                except Exception:
-                                    pass
-                            if sn.get("notehead"):
-                                try:
-                                    ch.notehead = str(sn["notehead"])
-                                except Exception:
-                                    pass
-                        m.append(ch)
-                    else:
-                        pitch_val = n_info.get("staff_pitch") or n_info["pitch"]
-                        n = note.Note(pitch_val)
-                        n.duration = duration.Duration(comp_dur)
-                        n.volume.velocity = n_info["velocity"]
-                        if n_info.get("string") is not None and n_info.get("fret") is not None:
-                            try:
-                                n.articulations.append(articulations.StringIndication(int(n_info["string"])))
-                                n.articulations.append(articulations.FretIndication(int(n_info["fret"])))
-                            except Exception:
-                                pass
-                        if n_info.get("lyric") and c_idx == 0:
-                            try:
-                                n.lyric = str(n_info["lyric"])
-                            except Exception:
-                                pass
-                        if n_info.get("notehead"):
-                            try:
-                                n.notehead = str(n_info["notehead"])
-                            except Exception:
-                                pass
-                        
-                        # Tie handling
-                        if n_info.get("tie_type"):
-                            n.tie = tie.Tie(n_info["tie_type"])
-                        elif is_sub_tied:
-                            if c_idx < len(dur_components) - 1:
-                                n.tie = tie.Tie('start')
-                            elif c_idx > 0:
-                                n.tie = tie.Tie('stop')
-                        m.append(n)
-
-                curr_pos = target_offset + max_dur
-
-            # Fill remaining measure with rests
-            remaining = measure_len_frac - curr_pos
-            if remaining >= Fraction(1, 8):
-                for rest_dur in cls.decompose_into_standard_durations(remaining):
-                    r = note.Rest()
-                    r.duration = duration.Duration(rest_dur)
-                    m.append(r)
+            if len(v2_notes) > 0:
+                v1 = stream.Voice(id='1')
+                v2 = stream.Voice(id='2')
+                cls._fill_voice_events(v1, v1_notes, measure_len_frac, stem_dir='up')
+                cls._fill_voice_events(v2, v2_notes, measure_len_frac, stem_dir='down')
+                m.append(v1)
+                m.append(v2)
+            else:
+                cls._fill_voice_events(m, v1_notes, measure_len_frac, stem_dir=None)
 
             part.append(m)
 
         return part
+
+    @classmethod
+    def _fill_voice_events(
+        cls,
+        target_stream: stream.Stream,
+        notes_list: List[Dict[str, Any]],
+        measure_len_frac: Fraction,
+        stem_dir: Optional[str] = None
+    ):
+        """Fills quantized notes, chords, and rest gaps into a Measure or Voice stream."""
+        notes_list.sort(key=lambda x: x["m_offset"])
+
+        curr_pos = Fraction(0, 1)
+        idx = 0
+        while idx < len(notes_list):
+            n_info = notes_list[idx]
+            target_offset = max(curr_pos, n_info["m_offset"])
+
+            # Insert rests if gap exists
+            gap = target_offset - curr_pos
+            if gap >= Fraction(1, 8):
+                for rest_dur in cls.decompose_into_standard_durations(gap):
+                    r = note.Rest()
+                    r.duration = duration.Duration(rest_dur)
+                    target_stream.append(r)
+                curr_pos = target_offset
+
+            # Group chords
+            simultaneous = [n_info]
+            next_idx = idx + 1
+            while next_idx < len(notes_list) and notes_list[next_idx]["m_offset"] == n_info["m_offset"]:
+                simultaneous.append(notes_list[next_idx])
+                next_idx += 1
+
+            idx = next_idx
+            max_dur = max(sn["dur_frac"] for sn in simultaneous)
+
+            # Decompose note duration into standard components if complex
+            dur_components = cls.decompose_into_standard_durations(max_dur)
+            for c_idx, comp_dur in enumerate(dur_components):
+                is_sub_tied = (len(dur_components) > 1)
+                if len(simultaneous) > 1:
+                    pitches = [sn.get("staff_pitch") or sn["pitch"] for sn in simultaneous]
+                    ch = chord.Chord(pitches)
+                    ch.duration = duration.Duration(comp_dur)
+                    ch.volume.velocity = simultaneous[0]["velocity"]
+                    if stem_dir:
+                        ch.stemDirection = stem_dir
+                    for sn in simultaneous:
+                        if sn.get("string") is not None and sn.get("fret") is not None:
+                            try:
+                                ch.articulations.append(articulations.StringIndication(int(sn["string"])))
+                                ch.articulations.append(articulations.FretIndication(int(sn["fret"])))
+                            except Exception:
+                                pass
+                        if sn.get("lyric") and c_idx == 0:
+                            try:
+                                ch.lyric = str(sn["lyric"])
+                            except Exception:
+                                pass
+                        if sn.get("notehead"):
+                            try:
+                                ch.notehead = str(sn["notehead"])
+                            except Exception:
+                                pass
+                    target_stream.append(ch)
+                else:
+                    pitch_val = n_info.get("staff_pitch") or n_info["pitch"]
+                    n = note.Note(pitch_val)
+                    n.duration = duration.Duration(comp_dur)
+                    n.volume.velocity = n_info["velocity"]
+                    if stem_dir:
+                        n.stemDirection = stem_dir
+                    if n_info.get("string") is not None and n_info.get("fret") is not None:
+                        try:
+                            n.articulations.append(articulations.StringIndication(int(n_info["string"])))
+                            n.articulations.append(articulations.FretIndication(int(n_info["fret"])))
+                        except Exception:
+                            pass
+                    if n_info.get("lyric") and c_idx == 0:
+                        try:
+                            n.lyric = str(n_info["lyric"])
+                        except Exception:
+                            pass
+                    if n_info.get("notehead"):
+                        try:
+                            n.notehead = str(n_info["notehead"])
+                        except Exception:
+                            pass
+                    
+                    # Tie handling
+                    if n_info.get("tie_type"):
+                        n.tie = tie.Tie(n_info["tie_type"])
+                    elif is_sub_tied:
+                        if c_idx < len(dur_components) - 1:
+                            n.tie = tie.Tie('start')
+                        elif c_idx > 0:
+                            n.tie = tie.Tie('stop')
+                    target_stream.append(n)
+
+            curr_pos = target_offset + max_dur
+
+        # Fill remaining measure with rests
+        remaining = measure_len_frac - curr_pos
+        if remaining >= Fraction(1, 8):
+            for rest_dur in cls.decompose_into_standard_durations(remaining):
+                r = note.Rest()
+                r.duration = duration.Duration(rest_dur)
+                target_stream.append(r)
 
     @classmethod
     def _pad_part_measures(cls, part: stream.Part, target_count: int, measure_len_frac: Fraction) -> None:
