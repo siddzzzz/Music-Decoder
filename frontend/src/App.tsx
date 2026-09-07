@@ -33,6 +33,7 @@ import { GuitarFretboard } from './components/GuitarFretboard';
 import { LyricsKaraokeViewer } from './components/LyricsKaraokeViewer';
 import { DrumKitVisualizer } from './components/DrumKitVisualizer';
 import { WaterfallVisualizer } from './components/WaterfallVisualizer';
+import { LiveMicRecorder } from './components/LiveMicRecorder';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -45,6 +46,7 @@ export const App: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'waterfall' | 'pianoroll' | 'guitar_tab' | 'drums' | 'karaoke' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isLiveMicOpen, setIsLiveMicOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
 
@@ -113,6 +115,33 @@ export const App: React.FC = () => {
       triggerConfetti();
     } catch (err: any) {
       alert(`Error transcribing audio: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleTranscribeLiveMic = async (file: File, preset: string, bpm?: number) => {
+    const updatedOptions: TranscriptionOptions = {
+      ...options,
+      mode: 'single',
+      preset,
+      bpm_override: bpm || options.bpm_override
+    };
+    setOptions(updatedOptions);
+    setIsLoading(true);
+    setLoadingMessage(`Transcribing live ${preset} take "${file.name}" with AI neural model...`);
+    setLastUploadedFile(file);
+    setLastSampleId(null);
+    setHasPendingEdits(false);
+
+    try {
+      const res = await transcribeAudioFile(file, updatedOptions, `Live Mic Take (${preset})`);
+      setResult(res);
+      setActiveTab('score');
+      triggerConfetti();
+    } catch (err: any) {
+      alert(`Error transcribing live microphone take: ${err.message || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
@@ -248,6 +277,7 @@ export const App: React.FC = () => {
         onOpenExport={() => setIsExportOpen(true)}
         onPrint={handlePrint}
         onReset={handleReset}
+        onOpenLiveMic={() => setIsLiveMicOpen(true)}
       />
 
       <main className="main-content">
@@ -262,6 +292,7 @@ export const App: React.FC = () => {
               onOptionsChange={setOptions}
               isLoading={isLoading}
               loadingMessage={loadingMessage}
+              onOpenLiveMic={() => setIsLiveMicOpen(true)}
             />
 
             <ControlPanel
@@ -584,6 +615,14 @@ export const App: React.FC = () => {
           onPrint={handlePrint}
         />
       )}
+
+      {/* Live Microphone Studio Modal */}
+      <LiveMicRecorder
+        isOpen={isLiveMicOpen}
+        onClose={() => setIsLiveMicOpen(false)}
+        onTranscribe={handleTranscribeLiveMic}
+        isLoading={isLoading}
+      />
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Mic, MicOff, Play, Sparkles, FileAudio, Disc, ArrowRight } from 'lucide-react';
+import { Upload, Mic, Play, Sparkles, FileAudio, Disc, ArrowRight } from 'lucide-react';
 import type { SampleTrack, TranscriptionOptions } from '../types';
 
 interface AudioUploaderProps {
@@ -10,6 +10,7 @@ interface AudioUploaderProps {
   onOptionsChange: (newOptions: TranscriptionOptions) => void;
   isLoading: boolean;
   loadingMessage: string;
+  onOpenLiveMic?: () => void;
 }
 
 export const AudioUploader: React.FC<AudioUploaderProps> = ({
@@ -20,21 +21,16 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
   onOptionsChange,
   isLoading,
   loadingMessage,
+  onOpenLiveMic,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordSeconds, setRecordSeconds] = useState(0);
   const [playingSampleId, setPlayingSampleId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordTimerRef = useRef<number | null>(null);
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     return () => {
-      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       if (sampleAudioRef.current) sampleAudioRef.current.pause();
     };
   }, []);
@@ -64,44 +60,6 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       onUploadFile(e.target.files[0]);
-    }
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const recordedFile = new File([audioBlob], 'live_recording.wav', { type: 'audio/wav' });
-        stream.getTracks().forEach(t => t.stop());
-        onUploadFile(recordedFile);
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordSeconds(0);
-
-      recordTimerRef.current = window.setInterval(() => {
-        setRecordSeconds(s => s + 1);
-      }, 1000);
-    } catch (err) {
-      alert('Microphone access denied or not available.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     }
   };
 
@@ -268,22 +226,20 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
                 <span>Browse Audio File</span>
               </button>
 
-              <button
-                type="button"
-                className={`btn ${isRecording ? 'btn-outline' : 'btn-secondary'}`}
-                style={{
-                  borderColor: isRecording ? '#f43f5e' : undefined,
-                  color: isRecording ? '#f43f5e' : undefined,
-                  background: isRecording ? 'rgba(244, 63, 94, 0.15)' : undefined
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  isRecording ? stopRecording() : startRecording();
-                }}
-              >
-                {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
-                <span>{isRecording ? `Recording (${recordSeconds}s) - Click to Stop` : 'Record Microphone'}</span>
-              </button>
+              {onOpenLiveMic && (
+                <button
+                  type="button"
+                  className="btn btn-cyan"
+                  style={{ padding: '8px 18px' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLiveMic();
+                  }}
+                >
+                  <Mic size={16} />
+                  <span>Live Mic / Whistle Studio</span>
+                </button>
+              )}
             </div>
           </div>
         )}

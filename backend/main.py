@@ -95,14 +95,38 @@ async def transcribe_audio(
     key_tonic_override: Optional[str] = Form(None),
     key_mode_override: Optional[str] = Form(None),
     title: str = Form("Transcribed Instrumental"),
-    composer: str = Form("Instrumental Performer")
+    composer: str = Form("Instrumental Performer"),
+    preset: Optional[str] = Form(None)
 ):
     """
-    Transcribes an uploaded audio file into quantized Sheet Music (MusicXML, MIDI, PDF).
+    Transcribes an uploaded audio file or live microphone recording into quantized Sheet Music (MusicXML, MIDI, PDF).
     """
     task_id = str(uuid.uuid4())
     task_dir = TEMP_DIR / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
+
+    # Apply mic / instrument specific preset thresholds if provided
+    eff_onset = onset_threshold
+    eff_frame = frame_threshold
+    eff_min_len = minimum_note_length
+    if preset:
+        preset_clean = preset.lower().strip()
+        if preset_clean == "whistle":
+            eff_onset = 0.42
+            eff_frame = 0.25
+            eff_min_len = 45.0
+        elif preset_clean == "singing":
+            eff_onset = 0.45
+            eff_frame = 0.28
+            eff_min_len = 50.0
+        elif preset_clean == "guitar":
+            eff_onset = 0.40
+            eff_frame = 0.22
+            eff_min_len = 40.0
+        elif preset_clean == "wind":
+            eff_onset = 0.48
+            eff_frame = 0.30
+            eff_min_len = 55.0
 
     # Save uploaded file
     file_ext = Path(audio_file.filename or "audio.wav").suffix or ".wav"
@@ -114,9 +138,9 @@ async def transcribe_audio(
     return _process_transcription(
         task_id=task_id,
         audio_path=str(input_path),
-        onset_threshold=onset_threshold,
-        frame_threshold=frame_threshold,
-        minimum_note_length=minimum_note_length,
+        onset_threshold=eff_onset,
+        frame_threshold=eff_frame,
+        minimum_note_length=eff_min_len,
         quantization_grid=quantization_grid,
         clef_mode=clef_mode,
         time_signature=time_signature,
@@ -196,8 +220,12 @@ def _process_transcription(
 
     # 1. Audio Processing & Feature Extraction
     audio_features = AudioProcessor.analyze_audio(audio_path)
-    detected_bpm = audio_features["tempo"]
-    effective_bpm = float(bpm_override) if bpm_override and bpm_override > 0 else detected_bpm
+    detected_bpm = audio_features.get("tempo", 120.0)
+    if not detected_bpm or detected_bpm <= 0:
+        detected_bpm = 120.0
+    effective_bpm = float(bpm_override) if (bpm_override and float(bpm_override) > 0) else detected_bpm
+    if not effective_bpm or effective_bpm <= 0:
+        effective_bpm = 120.0
 
     detected_key = audio_features["key"]
     effective_tonic = key_tonic_override if key_tonic_override else detected_key["tonic"]

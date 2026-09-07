@@ -48,7 +48,8 @@ class Transcriber:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        # Run inference
+        # Run inference with guarded tempo
+        safe_tempo = float(midi_tempo) if (midi_tempo and float(midi_tempo) > 0) else 120.0
         _, midi_data, note_events_raw = predict(
             audio_path=pathlib.Path(audio_path),
             model_or_model_path=self.model_path,
@@ -59,7 +60,7 @@ class Transcriber:
             maximum_frequency=maximum_frequency,
             multiple_pitch_bends=multiple_pitch_bends,
             melodia_trick=melodia_trick,
-            midi_tempo=float(midi_tempo),
+            midi_tempo=safe_tempo,
         )
 
         parsed_events: List[Dict[str, Any]] = []

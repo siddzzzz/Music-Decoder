@@ -1,5 +1,5 @@
 import React from 'react';
-import { Music, Download, Printer, RefreshCw, Sparkles } from 'lucide-react';
+import { Music, Download, Printer, RefreshCw, Sparkles, Mic } from 'lucide-react';
 
 interface NavbarProps {
   backendOnline: boolean;
@@ -7,6 +7,7 @@ interface NavbarProps {
   onOpenExport: () => void;
   onPrint: () => void;
   onReset: () => void;
+  onOpenLiveMic?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenExport,
   onPrint,
   onReset,
+  onOpenLiveMic,
 }) => {
   return (
     <header className="navbar-container" style={{
@@ -100,6 +102,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {onOpenLiveMic && (
+            <button
+              className="btn btn-cyan"
+              onClick={onOpenLiveMic}
+              style={{ fontSize: '0.84rem', padding: '7px 14px', borderRadius: 10 }}
+              title="Record Live Singing, Whistling, or Instrument"
+            >
+              <Mic size={15} />
+              <span>Live Mic Studio</span>
+            </button>
+          )}
+
           {hasResult && (
             <>
               <button

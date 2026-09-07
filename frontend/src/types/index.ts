@@ -116,4 +116,5 @@ export interface TranscriptionOptions {
   key_tonic_override?: string;
   key_mode_override?: string;
   voice_separation?: boolean;
+  preset?: string;
 }

@@ -57,13 +57,17 @@ class AudioProcessor:
             if isinstance(tempo, np.ndarray):
                 tempo = float(tempo[0]) if len(tempo) > 0 else 120.0
             else:
-                tempo = float(tempo)
-            
-            # Constrain tempo to reasonable musical range (60 - 200)
-            if tempo < 55.0 and tempo > 0:
+                tempo = float(tempo) if tempo is not None else 120.0
+
+            if np.isnan(tempo) or tempo <= 0:
+                tempo = 120.0
+            elif tempo < 55.0:
                 tempo *= 2.0
             elif tempo > 210.0:
                 tempo /= 2.0
+
+            if tempo <= 0 or np.isnan(tempo):
+                tempo = 120.0
 
             beat_times = librosa.frames_to_time(beat_frames, sr=sr)
             if len(beat_times) == 0:

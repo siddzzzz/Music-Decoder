@@ -50,6 +50,9 @@ export async function transcribeAudioFile(
     formData.append('frame_threshold', options.frame_threshold.toString());
     formData.append('minimum_note_length', options.minimum_note_length.toString());
     formData.append('clef_mode', options.clef_mode);
+    if (options.preset) {
+      formData.append('preset', options.preset);
+    }
   }
 
   const res = await fetch(endpoint, {
