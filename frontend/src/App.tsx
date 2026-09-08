@@ -34,6 +34,7 @@ import { LyricsKaraokeViewer } from './components/LyricsKaraokeViewer';
 import { DrumKitVisualizer } from './components/DrumKitVisualizer';
 import { WaterfallVisualizer } from './components/WaterfallVisualizer';
 import { LiveMicRecorder } from './components/LiveMicRecorder';
+import { HarmonizerModal } from './components/HarmonizerModal';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'waterfall' | 'pianoroll' | 'guitar_tab' | 'drums' | 'karaoke' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isLiveMicOpen, setIsLiveMicOpen] = useState(false);
+  const [isHarmonizerOpen, setIsHarmonizerOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
 
@@ -368,6 +370,27 @@ export const App: React.FC = () => {
                 <div className="badge badge-amber" style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
                   <span>Duration: {result.duration}s</span>
                 </div>
+
+                {/* Auto-Harmonize & Transposition Action Button */}
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setIsHarmonizerOpen(true)}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '0.8rem',
+                    borderRadius: 8,
+                    border: '1px solid rgba(168, 85, 247, 0.45)',
+                    background: 'rgba(168, 85, 247, 0.15)',
+                    color: '#c4b5fd',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                  title="Open Auto-Harmonizer & Key Transposition Studio"
+                >
+                  <Sparkles size={13} color="#c4b5fd" />
+                  <span>🎼 Auto-Harmonize &amp; Transpose</span>
+                </button>
               </div>
             </div>
 
@@ -540,7 +563,10 @@ export const App: React.FC = () => {
 
             {/* Tab Views */}
             {activeTab === 'score' && (
-              <ScoreViewer result={result} />
+              <ScoreViewer
+                result={result}
+                onOpenHarmonizer={() => setIsHarmonizerOpen(true)}
+              />
             )}
 
             {activeTab === 'mixer' && result.is_multitrack && (
@@ -623,6 +649,19 @@ export const App: React.FC = () => {
         onTranscribe={handleTranscribeLiveMic}
         isLoading={isLoading}
       />
+
+      {/* Auto-Harmonizer & Key Transposition Studio Modal */}
+      {result && (
+        <HarmonizerModal
+          isOpen={isHarmonizerOpen}
+          onClose={() => setIsHarmonizerOpen(false)}
+          result={result}
+          onApplyResult={(updated) => {
+            setResult(updated);
+            setHasPendingEdits(false);
+          }}
+        />
+      )}
     </div>
   );
 };

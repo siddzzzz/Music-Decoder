@@ -6,9 +6,10 @@ import { soundfontService, type SoundfontInstrumentName } from '../services/soun
 
 interface ScoreViewerProps {
   result: TranscriptionResult;
+  onOpenHarmonizer?: () => void;
 }
 
-export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
+export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmonizer }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const osmdRef = useRef<OpenSheetMusicDisplay | null>(null);
 
@@ -371,6 +372,29 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result }) => {
             </span>
             <button className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '0.75rem' }} onClick={() => handleTranspose(1)}>+</button>
           </div>
+
+          {/* Auto-Harmonize & Transpose Studio Launcher */}
+          {onOpenHarmonizer && (
+            <button
+              className="btn btn-secondary"
+              onClick={onOpenHarmonizer}
+              title="Open Auto-Harmonizer & Key Transposition Studio"
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                borderRadius: 8,
+                border: '1px solid rgba(168, 85, 247, 0.45)',
+                background: 'rgba(168, 85, 247, 0.14)',
+                color: '#c4b5fd',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <Sparkles size={13} color="#c4b5fd" />
+              <span>Auto-Harmonize &amp; Key Transpose</span>
+            </button>
+          )}
 
           {/* Zoom */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

@@ -139,3 +139,64 @@ export async function reQuantizeScore(payload: {
   return res.json();
 }
 
+export async function harmonizeScore(payload: {
+  task_id: string;
+  notes: any[];
+  style: string;
+  bpm: number;
+  time_signature: string;
+  key_tonic: string;
+  key_mode: string;
+  quantization_grid: string;
+  title?: string;
+  composer?: string;
+}): Promise<TranscriptionResult> {
+  const res = await fetch(`${API_BASE}/harmonize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to harmonize score.');
+  }
+
+  return res.json();
+}
+
+export async function transposeScore(payload: {
+  task_id: string;
+  notes: any[];
+  semitones: number;
+  key_tonic: string;
+  key_mode: string;
+  bpm: number;
+  time_signature: string;
+  clef_mode?: string;
+  quantization_grid?: string;
+  title?: string;
+  composer?: string;
+  chords?: any[];
+  is_multitrack?: boolean;
+  tracks?: Record<string, any>;
+}): Promise<TranscriptionResult> {
+  const res = await fetch(`${API_BASE}/transpose`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to transpose score.');
+  }
+
+  return res.json();
+}
+
+

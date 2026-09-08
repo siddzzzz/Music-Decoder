@@ -25,6 +25,8 @@ from engine.multitrack_engine import MultiTrackEngine
 from engine.chord_detector import ChordDetector
 from engine.tab_engine import GuitarTabEngine
 from engine.lyrics_aligner import LyricsAligner
+from engine.harmonizer import HarmonizerEngine
+from engine.transposer import ScoreTransposer
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -888,5 +890,287 @@ async def re_quantize_score(req: ReQuantizeRequest):
         "musicxml": musicxml_content,
         "exports": exports_dict
     }
+
+
+class HarmonizeRequest(BaseModel):
+    task_id: str
+    notes: List[Dict[str, Any]]
+    style: str = "choir_3part"  # "choir_3part" | "string_quartet" | "brass_horns" | "jazz_tensions"
+    bpm: float = 120.0
+    time_signature: str = "4/4"
+    key_tonic: str = "C"
+    key_mode: str = "major"
+    quantization_grid: str = "1/16"
+    title: Optional[str] = "Harmonized Arrangement"
+    composer: Optional[str] = "Music-Decoder Harmonizer"
+
+
+@app.post("/api/harmonize")
+async def harmonize_melody_score(req: HarmonizeRequest):
+    """
+    Generates multi-part harmonies (choir, string quartet, brass, jazz tensions)
+    for an existing melody and engraves a multi-staff conductor score.
+    """
+    task_dir = TEMP_DIR / req.task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Generate harmonized voicings
+    harm_res = HarmonizerEngine.harmonize_melody(
+        melody_notes=req.notes,
+        bpm=req.bpm,
+        time_signature=req.time_signature,
+        key_tonic=req.key_tonic,
+        key_mode=req.key_mode,
+        style=req.style
+    )
+    tracks = harm_res["tracks"]
+    all_harmonized_notes = harm_res["all_notes"]
+
+    # 2. Build multi-staff score
+    score = ScoreQuantizer.build_multitrack_score(
+        tracks=tracks,
+        bpm=req.bpm,
+        time_signature_str=req.time_signature,
+        key_tonic=req.key_tonic,
+        key_mode=req.key_mode,
+        quantization_grid=req.quantization_grid,
+        title=f"{req.title} ({req.style.replace('_', ' ').title()})",
+        composer=req.composer
+    )
+
+    # 3. Save multi-track exports
+    musicxml_path = str(task_dir / "score.musicxml")
+    midi_path = str(task_dir / "transcription.mid")
+    pdf_path = str(task_dir / "sheet_music.pdf")
+
+    ScoreExporter.save_musicxml(score, musicxml_path)
+    ScoreExporter.save_multitrack_midi(tracks, req.bpm, midi_path)
+    ScoreExporter.generate_multitrack_pdf_report(
+        output_path=pdf_path,
+        title=f"{req.title} ({req.style.replace('_', ' ').title()})",
+        composer=req.composer,
+        bpm=req.bpm,
+        key_signature=f"{req.key_tonic} {req.key_mode.capitalize()}",
+        time_signature=req.time_signature,
+        tracks=tracks
+    )
+
+    # 4. Generate parts and booklet
+    parts_booklet_info = _generate_parts_and_booklet(
+        task_dir=task_dir,
+        tracks=tracks,
+        effective_bpm=req.bpm,
+        time_signature=req.time_signature,
+        effective_tonic=req.key_tonic,
+        effective_mode=req.key_mode,
+        quantization_grid=req.quantization_grid,
+        title=req.title,
+        composer=req.composer,
+        task_id=req.task_id
+    )
+
+    # 5. Chords & Tablature
+    chords = ChordDetector.analyze_chords_by_measure(all_harmonized_notes, req.bpm, req.time_signature)
+    tab_notes = GuitarTabEngine.optimize_tablature(all_harmonized_notes)
+    ascii_tab = GuitarTabEngine.generate_ascii_tab(tab_notes, req.bpm, req.time_signature)
+
+    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+
+    return {
+        "task_id": req.task_id,
+        "is_multitrack": True,
+        "harmony_style": req.style,
+        "tempo": round(req.bpm, 1),
+        "key": {
+            "tonic": req.key_tonic,
+            "mode": req.key_mode,
+            "display": f"{req.key_tonic} {req.key_mode.capitalize()}",
+            "confidence": 1.0
+        },
+        "time_signature": req.time_signature,
+        "quantization_grid": req.quantization_grid,
+        "notes_count": len(all_harmonized_notes),
+        "notes": all_harmonized_notes,
+        "tab_notes": tab_notes,
+        "ascii_tab": ascii_tab,
+        "chords": chords,
+        "tracks": tracks,
+        "musicxml": musicxml_content,
+        "exports": {
+            "midi": f"/api/export/{req.task_id}/midi",
+            "musicxml": f"/api/export/{req.task_id}/musicxml",
+            "pdf": f"/api/export/{req.task_id}/pdf",
+            "audio": f"/api/export/{req.task_id}/audio",
+            "booklet": parts_booklet_info["booklet"],
+            "parts": parts_booklet_info["parts"]
+        }
+    }
+
+
+class TransposeRequest(BaseModel):
+    task_id: str
+    notes: List[Dict[str, Any]]
+    semitones: int = 0
+    key_tonic: str = "C"
+    key_mode: str = "major"
+    bpm: float = 120.0
+    time_signature: str = "4/4"
+    clef_mode: str = "grand_staff"
+    quantization_grid: str = "1/16"
+    title: Optional[str] = "Transposed Score"
+    composer: Optional[str] = "Music-Decoder Editor"
+    chords: Optional[List[Dict[str, Any]]] = None
+    is_multitrack: bool = False
+    tracks: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/transpose")
+async def transpose_score(req: TransposeRequest):
+    """
+    Transposes note pitches, key signatures, chord figures, and guitar TAB
+    by the specified number of semitones (-12 to +12).
+    """
+    task_dir = TEMP_DIR / req.task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    trans_result = ScoreTransposer.transpose_score_data(
+        notes=req.notes,
+        semitones=req.semitones,
+        key_tonic=req.key_tonic,
+        key_mode=req.key_mode,
+        chords=req.chords,
+        bpm=req.bpm,
+        time_signature=req.time_signature,
+        is_bass=(req.clef_mode == "bass")
+    )
+
+    transposed_notes = trans_result["notes"]
+    new_key = trans_result["key"]
+    transposed_chords = trans_result["chords"]
+    tab_notes = trans_result["tab_notes"]
+    ascii_tab = trans_result["ascii_tab"]
+
+    parts_booklet_info = None
+
+    if req.is_multitrack and req.tracks:
+        # Transpose each individual track
+        updated_tracks: Dict[str, Any] = {}
+        for t_id, t_info in req.tracks.items():
+            t_notes = t_info.get("notes", [])
+            t_trans = ScoreTransposer.transpose_score_data(
+                notes=t_notes,
+                semitones=req.semitones,
+                key_tonic=req.key_tonic,
+                key_mode=req.key_mode,
+                bpm=req.bpm,
+                time_signature=req.time_signature,
+                is_bass=(t_id == "bass")
+            )
+            updated_info = copy.deepcopy(t_info)
+            updated_info["notes"] = t_trans["notes"]
+            updated_info["notes_count"] = len(t_trans["notes"])
+            updated_tracks[t_id] = updated_info
+
+        score = ScoreQuantizer.build_multitrack_score(
+            tracks=updated_tracks,
+            bpm=req.bpm,
+            time_signature_str=req.time_signature,
+            key_tonic=new_key["tonic"],
+            key_mode=new_key["mode"],
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Transposed Orchestral Score",
+            composer=req.composer or "Music-Decoder"
+        )
+        ScoreExporter.save_musicxml(score, str(task_dir / "score.musicxml"))
+        ScoreExporter.save_multitrack_midi(updated_tracks, req.bpm, str(task_dir / "transcription.mid"))
+        ScoreExporter.generate_multitrack_pdf_report(
+            output_path=str(task_dir / "sheet_music.pdf"),
+            title=req.title or "Transposed Orchestral Score",
+            composer=req.composer or "Music-Decoder",
+            bpm=req.bpm,
+            key_signature=new_key["display"],
+            time_signature=req.time_signature,
+            tracks=updated_tracks
+        )
+        parts_booklet_info = _generate_parts_and_booklet(
+            task_dir=task_dir,
+            tracks=updated_tracks,
+            effective_bpm=req.bpm,
+            time_signature=req.time_signature,
+            effective_tonic=new_key["tonic"],
+            effective_mode=new_key["mode"],
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Transposed Orchestral Score",
+            composer=req.composer or "Music-Decoder",
+            task_id=req.task_id
+        )
+        tracks_to_return = updated_tracks
+    else:
+        score = ScoreQuantizer.build_score(
+            note_events=transposed_notes,
+            bpm=req.bpm,
+            time_signature_str=req.time_signature,
+            key_tonic=new_key["tonic"],
+            key_mode=new_key["mode"],
+            clef_mode=req.clef_mode,
+            quantization_grid=req.quantization_grid,
+            title=req.title or "Transposed Score",
+            composer=req.composer or "Music-Decoder"
+        )
+        pm = pretty_midi.PrettyMIDI(initial_tempo=req.bpm)
+        inst = pretty_midi.Instrument(program=0)
+        for n in transposed_notes:
+            pm_note = pretty_midi.Note(
+                velocity=int(n.get("velocity", 80)),
+                pitch=int(n["pitch"]),
+                start=float(n["start"]),
+                end=float(n["end"])
+            )
+            inst.notes.append(pm_note)
+        pm.instruments.append(inst)
+
+        ScoreExporter.save_musicxml(score, str(task_dir / "score.musicxml"))
+        ScoreExporter.save_midi(pm, str(task_dir / "transcription.mid"))
+        ScoreExporter.generate_pdf_report(
+            output_path=str(task_dir / "sheet_music.pdf"),
+            title=req.title or "Transposed Score",
+            composer=req.composer or "Music-Decoder",
+            bpm=req.bpm,
+            key_signature=new_key["display"],
+            time_signature=req.time_signature,
+            note_events=transposed_notes,
+            clef_mode=req.clef_mode
+        )
+        tracks_to_return = req.tracks
+
+    musicxml_content = ScoreQuantizer.to_musicxml_string(score)
+    exports_dict = {
+        "midi": f"/api/export/{req.task_id}/midi",
+        "musicxml": f"/api/export/{req.task_id}/musicxml",
+        "pdf": f"/api/export/{req.task_id}/pdf",
+        "audio": f"/api/export/{req.task_id}/audio"
+    }
+    if parts_booklet_info:
+        exports_dict["booklet"] = parts_booklet_info["booklet"]
+        exports_dict["parts"] = parts_booklet_info["parts"]
+
+    return {
+        "task_id": req.task_id,
+        "is_multitrack": req.is_multitrack,
+        "tempo": round(req.bpm, 1),
+        "key": new_key,
+        "time_signature": req.time_signature,
+        "clef_mode": req.clef_mode,
+        "quantization_grid": req.quantization_grid,
+        "notes_count": len(transposed_notes),
+        "notes": transposed_notes,
+        "tab_notes": tab_notes,
+        "ascii_tab": ascii_tab,
+        "chords": transposed_chords,
+        "tracks": tracks_to_return,
+        "musicxml": musicxml_content,
+        "exports": exports_dict
+    }
+
 
 
