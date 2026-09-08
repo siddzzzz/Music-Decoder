@@ -14,7 +14,8 @@ import {
   Music2,
   Mic2,
   Disc,
-  PlaySquare
+  PlaySquare,
+  Repeat
 } from 'lucide-react';
 
 import type { TranscriptionResult, SampleTrack, TranscriptionOptions, NoteEvent } from './types';
@@ -35,6 +36,7 @@ import { DrumKitVisualizer } from './components/DrumKitVisualizer';
 import { WaterfallVisualizer } from './components/WaterfallVisualizer';
 import { LiveMicRecorder } from './components/LiveMicRecorder';
 import { HarmonizerModal } from './components/HarmonizerModal';
+import { PracticeLooper } from './components/PracticeLooper';
 
 export const App: React.FC = () => {
   const [backendOnline, setBackendOnline] = useState(false);
@@ -45,12 +47,13 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'score' | 'mixer' | 'waterfall' | 'pianoroll' | 'guitar_tab' | 'drums' | 'karaoke' | 'waveform' | 'notes'>('score');
+  const [activeTab, setActiveTab] = useState<'score' | 'looper' | 'mixer' | 'waterfall' | 'pianoroll' | 'guitar_tab' | 'drums' | 'karaoke' | 'waveform' | 'notes'>('score');
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isLiveMicOpen, setIsLiveMicOpen] = useState(false);
   const [isHarmonizerOpen, setIsHarmonizerOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<NoteEvent | null>(null);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
+  const [loopBounds, setLoopBounds] = useState<{ startMeasure: number; endMeasure: number } | null>(null);
 
   const [options, setOptions] = useState<TranscriptionOptions>({
     mode: 'single',
@@ -486,6 +489,20 @@ export const App: React.FC = () => {
                 <span>{result.is_multitrack ? "Conductor's Score" : "Sheet Music Score"}</span>
               </button>
 
+              <button
+                className={`btn ${activeTab === 'looper' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '0.86rem',
+                  border: activeTab === 'looper' ? '1px solid #8b5cf6' : undefined,
+                  boxShadow: activeTab === 'looper' ? '0 0 14px rgba(139, 92, 246, 0.4)' : undefined
+                }}
+                onClick={() => setActiveTab('looper')}
+              >
+                <Repeat size={16} color={activeTab === 'looper' ? '#ffffff' : '#c4b5fd'} />
+                <span>🎯 Practice Looper &amp; Speed Trainer</span>
+              </button>
+
               {result.is_multitrack && (
                 <button
                   className={`btn ${activeTab === 'mixer' ? 'btn-cyan' : 'btn-secondary'}`}
@@ -566,6 +583,19 @@ export const App: React.FC = () => {
               <ScoreViewer
                 result={result}
                 onOpenHarmonizer={() => setIsHarmonizerOpen(true)}
+                loopBounds={loopBounds}
+                onOpenPracticeLooper={() => setActiveTab('looper')}
+                onClearLoop={() => setLoopBounds(null)}
+              />
+            )}
+
+            {activeTab === 'looper' && (
+              <PracticeLooper
+                result={result}
+                onApplyLoopToScore={(start, end) => {
+                  setLoopBounds({ startMeasure: start, endMeasure: end });
+                  setActiveTab('score');
+                }}
               />
             )}
 

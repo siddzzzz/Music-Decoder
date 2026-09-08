@@ -1,15 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
-import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Gauge, Sparkles, Layers } from 'lucide-react';
+import { Play, Pause, Square, ZoomIn, ZoomOut, Volume2, Gauge, Sparkles, Layers, Repeat, X } from 'lucide-react';
 import type { TranscriptionResult } from '../types';
 import { soundfontService, type SoundfontInstrumentName } from '../services/soundfont';
 
 interface ScoreViewerProps {
   result: TranscriptionResult;
   onOpenHarmonizer?: () => void;
+  loopBounds?: { startMeasure: number; endMeasure: number } | null;
+  onOpenPracticeLooper?: () => void;
+  onClearLoop?: () => void;
 }
 
-export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmonizer }) => {
+export const ScoreViewer: React.FC<ScoreViewerProps> = ({
+  result,
+  onOpenHarmonizer,
+  loopBounds,
+  onOpenPracticeLooper,
+  onClearLoop
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const osmdRef = useRef<OpenSheetMusicDisplay | null>(null);
 
@@ -21,6 +30,26 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmoniz
   const [instrument, setInstrument] = useState<SoundfontInstrumentName>('acoustic_grand_piano');
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedPart, setSelectedPart] = useState<string>('all');
+
+  const secondsPerMeasure = React.useMemo(() => {
+    try {
+      const numBeats = parseInt(result.time_signature.split('/')[0], 10) || 4;
+      const bpm = Math.max(30, result.tempo || 120);
+      return (60.0 / bpm) * numBeats;
+    } catch {
+      return 2.0;
+    }
+  }, [result.time_signature, result.tempo]);
+
+  const [isLoopActive, setIsLoopActive] = useState<boolean>(!!loopBounds);
+
+  useEffect(() => {
+    if (loopBounds) {
+      setIsLoopActive(true);
+      const startSec = (loopBounds.startMeasure - 1) * secondsPerMeasure;
+      setCurrentTime(startSec);
+    }
+  }, [loopBounds, secondsPerMeasure]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playTimerRef = useRef<number | null>(null);
@@ -127,7 +156,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmoniz
     }
 
     playedNoteIndicesRef.current.clear();
-    const startTime = performance.now() - (currentTime * 1000 / playbackSpeed);
+    let startTime = performance.now() - (currentTime * 1000 / playbackSpeed);
 
     // Audio element playback if mode is audio
     if (playMode === 'audio') {
@@ -144,9 +173,23 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmoniz
       const elapsedSec = ((performance.now() - startTime) / 1000) * playbackSpeed;
       setCurrentTime(elapsedSec);
 
-      if (elapsedSec >= result.duration) {
-        handleStop();
-        return;
+      const loopStartSec = (loopBounds && isLoopActive) ? (loopBounds.startMeasure - 1) * secondsPerMeasure : 0;
+      const loopEndSec = (loopBounds && isLoopActive) ? loopBounds.endMeasure * secondsPerMeasure : result.duration;
+
+      if (elapsedSec >= loopEndSec) {
+        if (isLoopActive && loopBounds) {
+          startTime = performance.now() - (loopStartSec * 1000 / playbackSpeed);
+          playedNoteIndicesRef.current.clear();
+          setCurrentTime(loopStartSec);
+          if (audioRef.current) audioRef.current.currentTime = loopStartSec;
+          if (osmdRef.current && osmdRef.current.cursor) {
+            osmdRef.current.cursor.reset();
+          }
+          return;
+        } else {
+          handleStop();
+          return;
+        }
       }
 
       // Synthesize note events with authentic SoundFont for active part
@@ -180,7 +223,7 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmoniz
       if (audioRef.current) audioRef.current.pause();
       soundfontService.stop();
     };
-  }, [isPlaying, currentTime, playbackSpeed, playMode, transpose, activeNotes, result.duration, result.exports.audio]);
+  }, [isPlaying, currentTime, playbackSpeed, playMode, transpose, activeNotes, result.duration, result.exports.audio, loopBounds, isLoopActive, secondsPerMeasure]);
 
   const handlePlayToggle = () => {
     setIsPlaying(p => !p);
@@ -393,6 +436,62 @@ export const ScoreViewer: React.FC<ScoreViewerProps> = ({ result, onOpenHarmoniz
             >
               <Sparkles size={13} color="#c4b5fd" />
               <span>Auto-Harmonize &amp; Key Transpose</span>
+            </button>
+          )}
+
+          {/* Loop Bounds Indicator & Practice Studio Quick Action */}
+          {loopBounds && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: isLoopActive ? 'rgba(139, 92, 246, 0.22)' : 'rgba(30, 41, 59, 0.6)',
+              padding: '3px 10px',
+              borderRadius: 8,
+              border: isLoopActive ? '1px solid #8b5cf6' : '1px solid var(--border-subtle)'
+            }}>
+              <Repeat size={13} color={isLoopActive ? '#c4b5fd' : '#94a3b8'} />
+              <span style={{ fontSize: '0.78rem', color: isLoopActive ? '#f8fafc' : '#94a3b8', fontWeight: 700 }}>
+                Loop: M{loopBounds.startMeasure}–M{loopBounds.endMeasure}
+              </span>
+              <button
+                className={`btn ${isLoopActive ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setIsLoopActive(!isLoopActive)}
+                style={{ padding: '2px 8px', fontSize: '0.72rem', borderRadius: 6 }}
+              >
+                {isLoopActive ? 'ON' : 'OFF'}
+              </button>
+              {onClearLoop && (
+                <button
+                  onClick={onClearLoop}
+                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                  title="Clear Loop Bounds"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {onOpenPracticeLooper && (
+            <button
+              className="btn btn-secondary"
+              onClick={onOpenPracticeLooper}
+              style={{
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                borderRadius: 8,
+                border: '1px solid rgba(56, 189, 248, 0.45)',
+                background: 'rgba(56, 189, 248, 0.12)',
+                color: '#7dd3fc',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+              title="Open Speed Trainer & Practice Looper"
+            >
+              <Repeat size={13} color="#38bdf8" />
+              <span>Practice Studio</span>
             </button>
           )}
 
