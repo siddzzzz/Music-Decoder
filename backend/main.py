@@ -27,6 +27,7 @@ from engine.tab_engine import GuitarTabEngine
 from engine.lyrics_aligner import LyricsAligner
 from engine.harmonizer import HarmonizerEngine
 from engine.transposer import ScoreTransposer
+from engine.looper_engine import LooperEngine
 
 # Initialize directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -1171,6 +1172,99 @@ async def transpose_score(req: TransposeRequest):
         "musicxml": musicxml_content,
         "exports": exports_dict
     }
+
+
+class PracticeBoundsRequest(BaseModel):
+    notes: List[Dict[str, Any]]
+    bpm: float = 120.0
+    time_signature: str = "4/4"
+
+
+@app.post("/api/practice/bounds")
+def get_practice_measure_bounds(req: PracticeBoundsRequest):
+    """Computes start/end timestamps and note densities for all measures."""
+    bounds = LooperEngine.calculate_measure_bounds(
+        notes=req.notes,
+        bpm=req.bpm,
+        time_signature=req.time_signature
+    )
+    spm = LooperEngine.get_seconds_per_measure(req.bpm, req.time_signature)
+    return {
+        "seconds_per_measure": spm,
+        "measures": bounds,
+        "total_measures": len(bounds)
+    }
+
+
+class PracticeExcerptRequest(BaseModel):
+    task_id: str
+    notes: List[Dict[str, Any]]
+    start_measure: int = 1
+    end_measure: int = 4
+    bpm: float = 120.0
+    time_signature: str = "4/4"
+    key_tonic: str = "C"
+    key_mode: str = "major"
+    clef_mode: str = "grand_staff"
+    quantization_grid: str = "1/16"
+    rebase_to_zero: bool = True
+    start_percent: float = 60.0
+    target_percent: float = 100.0
+    step_percent: float = 10.0
+    reps_per_step: int = 2
+
+
+@app.post("/api/practice/excerpt")
+def get_practice_excerpt(req: PracticeExcerptRequest):
+    """
+    Extracts a sliced measure passage [start_measure, end_measure]
+    with isolated chords and an adaptive Speed Trainer ramp schedule.
+    """
+    excerpt = LooperEngine.slice_excerpt(
+        notes=req.notes,
+        start_measure=req.start_measure,
+        end_measure=req.end_measure,
+        bpm=req.bpm,
+        time_signature=req.time_signature,
+        rebase_to_zero=req.rebase_to_zero
+    )
+
+    speed_schedule = LooperEngine.generate_speed_ramp_schedule(
+        base_bpm=req.bpm,
+        start_percent=req.start_percent,
+        target_percent=req.target_percent,
+        step_percent=req.step_percent,
+        reps_per_step=req.reps_per_step
+    )
+
+    # Engrave isolated excerpt MusicXML snippet
+    score = ScoreQuantizer.build_score(
+        note_events=excerpt["notes"],
+        bpm=req.bpm,
+        time_signature_str=req.time_signature,
+        key_tonic=req.key_tonic,
+        key_mode=req.key_mode,
+        clef_mode=req.clef_mode,
+        quantization_grid=req.quantization_grid,
+        title=f"Practice Excerpt (M{req.start_measure}-M{req.end_measure})",
+        composer="Music-Decoder Practice Studio"
+    )
+    musicxml_str = ScoreQuantizer.to_musicxml_string(score)
+
+    return {
+        "task_id": req.task_id,
+        "start_measure": excerpt["start_measure"],
+        "end_measure": excerpt["end_measure"],
+        "start_time": excerpt["start_time"],
+        "end_time": excerpt["end_time"],
+        "duration": excerpt["duration"],
+        "notes_count": excerpt["notes_count"],
+        "notes": excerpt["notes"],
+        "chords": excerpt["chords"],
+        "musicxml": musicxml_str,
+        "speed_schedule": speed_schedule
+    }
+
 
 
 

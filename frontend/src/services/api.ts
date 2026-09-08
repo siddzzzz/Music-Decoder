@@ -199,4 +199,86 @@ export async function transposeScore(payload: {
   return res.json();
 }
 
+export interface MeasureDescriptor {
+  measure: number;
+  start: number;
+  end: number;
+  duration: number;
+  notes_count: number;
+}
+
+export interface PracticeBoundsResponse {
+  seconds_per_measure: number;
+  measures: MeasureDescriptor[];
+  total_measures: number;
+}
+
+export interface SpeedScheduleStep {
+  step: number;
+  percent: number;
+  bpm: number;
+  repetitions: number;
+}
+
+export interface PracticeExcerptResponse {
+  task_id: string;
+  start_measure: number;
+  end_measure: number;
+  start_time: number;
+  end_time: number;
+  duration: number;
+  notes_count: number;
+  notes: any[];
+  chords: any[];
+  musicxml: string;
+  speed_schedule: SpeedScheduleStep[];
+}
+
+export async function fetchPracticeBounds(payload: {
+  notes: any[];
+  bpm: number;
+  time_signature: string;
+}): Promise<PracticeBoundsResponse> {
+  const res = await fetch(`${API_BASE}/practice/bounds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to fetch practice bounds.');
+  }
+  return res.json();
+}
+
+export async function fetchPracticeExcerpt(payload: {
+  task_id: string;
+  notes: any[];
+  start_measure: number;
+  end_measure: number;
+  bpm: number;
+  time_signature: string;
+  key_tonic: string;
+  key_mode: string;
+  clef_mode?: string;
+  quantization_grid?: string;
+  rebase_to_zero?: boolean;
+  start_percent?: number;
+  target_percent?: number;
+  step_percent?: number;
+  reps_per_step?: number;
+}): Promise<PracticeExcerptResponse> {
+  const res = await fetch(`${API_BASE}/practice/excerpt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || 'Failed to generate practice excerpt.');
+  }
+  return res.json();
+}
+
+
 
